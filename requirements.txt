@@ -1,0 +1,54 @@
+# SpliceGAIP requirements (Python >= 3.10).
+# The multi-agent runtime (AutoGen) is the core dependency inherited from
+# BioGAIP; the data/analysis stack is shared with SplicingNexus.
+
+# --- multi-agent runtime (BioGAIP lineage) --------------------------------
+autogen-agentchat==0.7.5
+autogen-ext[openai]==0.7.5
+
+# --- data layer ------------------------------------------------------------
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+
+# --- visualization -----------------------------------------------------------
+matplotlib>=3.7
+seaborn>=0.12
+plotly>=5.18
+
+# --- knowledge / RAG ----------------------------------------------------------
+# The persistent literature store is SQLite (NFS-safe, no heavy deps).
+# A chromadb vector store can be enabled later as an optional accelerator:
+#   pip install chromadb
+pymed>=0.8             # optional at runtime; degrades gracefully when absent
+
+# --- persistence -------------------------------------------------------------
+SQLAlchemy>=2.0
+
+# --- report -------------------------------------------------------------------
+reportlab>=4.0
+
+# --- interfaces -----------------------------------------------------------------
+streamlit>=1.46   # st.image width="stretch" requires 1.46+
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# --- MCP (Model Context Protocol) ------------------------------------------------
+mcp>=1.0.0        # MCP SDK for server/client communication
+httpx>=0.27       # Async HTTP client for MCP tool calls
+
+# --- optional agent backends (Phase 2) -------------------------------------------
+# Both are optional: the agent detects them at runtime and falls back to the
+# built-in implementation when they are missing (see splicegaip/integrations).
+gseapy>=1.1       # GO/KEGG/Reactome/MSigDB enrichment via Enrichr
+mygene>=3.2       # MyGene.info gene annotation client
+
+# --- Step 5: enhanced bioinformatics services (optional) -------------------------
+# bioservices provides access to Ensembl, UniProt, KEGG, Reactome native APIs.
+# Falls back gracefully when not installed (uses existing mygene/gseapy instead).
+bioservices>=1.11 # Unified bioinformatics API client
+
+# --- tests -----------------------------------------------------------------------
+pytest>=8.0
+PyYAML>=6.0

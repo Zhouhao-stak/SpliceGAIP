@@ -1,0 +1,39 @@
+# SpliceGAIP agent roster.
+#
+# Declarative agent definitions in the BioGAIP tradition (agent_config.yaml),
+# simplified to the three core agents. Model clients are resolved from the
+# environment (MODEL_API_BASE_URL / MODEL_API_KEY / MODEL_NAME); when absent,
+# the deterministic offline policy drives the same team.
+#
+# This file documents the roster and is the source for future extensions
+# (e.g. a dedicated QC agent in Phase 2). The runtime prompt text lives in
+# splicegaip/agents/prompts.py.
+
+agents:
+  bio_planner:
+    model_client: default
+    tools: []
+    description: Understands the user's research objective and converts it into a structured analysis workflow. Speaks first.
+    system_message: planner
+  bio_analyst:
+    model_client: default
+    tools:
+      - summarize_dataset
+      - filter_significant_events
+      - rank_candidates
+      - run_enrichment
+      - generate_figures
+    description: Processes standardized AS events, computes statistics, ranks candidates and generates figures.
+    system_message: analyst
+  bio_interpreter:
+    model_client: default
+    tools:
+      - collect_literature_evidence
+      - interpret_candidates
+      - generate_report
+    description: Retrieves literature evidence, interprets the results biologically and writes the scientific report.
+    system_message: interpreter
+
+default_model: default
+termination_token: SPLICEGAIP_DONE
+max_turns: 40

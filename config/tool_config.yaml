@@ -1,0 +1,49 @@
+# SpliceGAIP tool registry.
+#
+# Tool declarations in the BioGAIP tradition (tool_config.yaml). Each tool is
+# implemented as a typed Python function bound to the run context and exposed
+# to the agents as an AutoGen FunctionTool; see splicegaip/tools/.
+
+tools:
+  summarize_dataset:
+    name: summarize_dataset
+    description: Return a compact summary of the loaded dataset (events, samples, groups, validation).
+    kwargs:
+      (none)
+  filter_significant_events:
+    name: filter_significant_events
+    description: Filter AS events by FDR and |delta PSI| with quality gating.
+    kwargs:
+      fdr_threshold: FDR significance threshold (default from configuration)
+      delta_psi_threshold: minimum |delta PSI| (default from configuration)
+  rank_candidates:
+    name: rank_candidates
+    description: Rank significant events by the composite candidate score.
+    kwargs:
+      top_n: number of candidates to keep (default from configuration)
+  run_enrichment:
+    name: run_enrichment
+    description: Run GO/KEGG over-representation analysis for candidate genes.
+    kwargs:
+      alpha: FDR threshold for enriched terms (default from configuration)
+  generate_figures:
+    name: generate_figures
+    description: Generate the publication figure set (PNG 300 DPI + SVG).
+    kwargs:
+      output_dir: figure output directory (default <project>/figures)
+  collect_literature_evidence:
+    name: collect_literature_evidence
+    description: Collect literature evidence for candidate genes.
+    kwargs:
+      genes: optional explicit gene list (default: top candidates)
+      max_per_gene: maximum PubMed records per gene
+  interpret_candidates:
+    name: interpret_candidates
+    description: Produce the evidence-grounded biological interpretation.
+    kwargs:
+      (none)
+  generate_report:
+    name: generate_report
+    description: Generate the scientific report (HTML and PDF).
+    kwargs:
+      output_dir: report output directory (default: project output directory)

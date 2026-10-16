@@ -1,0 +1,114 @@
+# SpliceGAIP system configuration.
+# LLM credentials are NEVER stored here; they are read from the environment
+# (MODEL_API_BASE_URL / MODEL_API_KEY / MODEL_NAME / MODEL_API_TIMEOUT_SECONDS)
+# or from a .env file placed next to the executable / project root.
+
+project:
+  name: SpliceGAIP
+  version: 0.1.0
+
+llm:
+  # Non-secret knobs for the enrichment layer. Credentials stay in env/.env.
+  #
+  # Set to false to force the offline deterministic policy even when a key
+  # is present (useful for reproducible regression runs).
+  enabled: true
+  #
+  # Which features may call the model. Omit (or "all") to enable everything:
+  #   understand  - 自然语言分析目标理解 + 参数建议
+  #   plan        - Planner 目标/局限性措辞精炼
+  #   interpret   - 结果叙述性解读（lead/段落/要点）
+  #   annotate    - 候选基因生物学注释
+  #   literature  - 文献证据摘要
+  #   limitations - 补充研究设计局限性
+  #   hypotheses  - 研究假设 + 验证实验建议
+  #   critique    - 对叙述做自动审查（可用 MODEL_CRITIC_NAME 指定审查模型）
+  features: all
+  #
+  # Per-call timeout, call budget per run and how many top genes get notes.
+  insight_timeout_seconds: 120
+  max_calls_per_run: 16
+  max_genes: 8
+  #
+  # Generated prose language: auto (follows the query script), zh or en.
+  language: auto
+  #
+  # Endpoint family. "auto" guesses from base_url/model; recognised values
+  # are deepseek / openai / moonshot / dashscope / generic. Only vendor
+  # quirks are switched on, never request semantics. Usually leave "auto".
+  provider: auto
+  #
+  # Reasoning mode (vendors that have one, currently DeepSeek).
+  #   auto     - tool-calling turns disable it (AutoGen cannot echo
+  #              reasoning_content back, which DeepSeek requires), while
+  #              report-insight turns keep it on; safest default.
+  #   disabled - never think: fastest, temperature works normally.
+  #   enabled  - always think: slowest and most expensive, but note that
+  #              the agent team then needs an endpoint that tolerates
+  #              missing reasoning_content.
+  thinking: auto
+  #
+  # Effort used when thinking is enabled. Empty = vendor default.
+  # One of: minimal, low, medium, high, xhigh, max.
+  reasoning_effort: ""
+
+paths:
+  # Runtime state lives on local disk by default: SQLite databases cannot
+  # be opened on NFS mounts (unsupported byte-range locking). Override with
+  # SPLICEGAIP_RUNTIME_ROOT / SPLICEGAIP_MEMORY_DB / SPLICEGAIP_LITERATURE_DB.
+  #
+  # All three are intentionally left unset: the databases default to sitting
+  # *under* the runtime root (/var/tmp/splicegaip on Linux/macOS, the system
+  # temp dir on Windows), so relocating the root moves everything at once.
+  # Uncomment to pin them explicitly:
+  # runtime_root: /var/tmp/splicegaip
+  # memory_db: /var/tmp/splicegaip/splicegaip.sqlite3
+  # literature_db: /var/tmp/splicegaip/literature.sqlite3
+
+analysis:
+  # Default significance gates (SpliceGAIP Agent Prompt System v0.1).
+  fdr_threshold: 0.05
+  delta_psi_threshold: 0.1
+  min_support_reads: 10
+  min_valid_samples: 2
+  top_candidates: 20
+  enrichment_alpha: 0.05
+
+agent:
+  # agentic  = 自治智能体：观察数据 → 自己决策 → 校验 → 反思重试（默认）
+  # scripted = 旧版固定脚本多智能体流程（完全等价于历史行为，便于回归对比）
+  mode: agentic
+  #
+  # 硬预算：任何情况下都不会无限循环。
+  max_steps: 20
+  max_seconds: 900
+  max_errors: 3
+  #
+  # 允许 agent 按数据自适应 FDR / |dPSI|（默认阈值取不出结果时才启用）。
+  adaptive_thresholds: true
+  # 自适应时希望得到的显著事件数量级。
+  target_significant: 100
+  #
+  # 结果校验 + 问题补救（自我纠错）。
+  reflection: true
+  # 必要工作完成后，是否再问一次模型要不要补一个洞察步骤（无 key 时自动跳过）。
+  llm_advisory: true
+  # 跨运行经验记忆：相似数据上次用什么阈值成功过。
+  episodic: true
+  # auto = 全自动；assisted = 关键决策（联网调用 / 放宽阈值 / 接受阻塞问题）先问人。
+  autonomy: auto
+  #
+  # Phase 2：统计假设检验——解读前先用预注册检验挑战自己的结果（纯本地，scipy）。
+  hypothesis_testing: true
+  #
+  # Phase 2：外部知识技能（MyGene / PubMed / Enrichr / 剪接解读）。
+  # 关闭或网络不可用时 agent 自动降级，并把缺口写进局限性。
+  skills:
+    enabled: true
+    max_calls: 4
+    timeout: 10
+
+report:
+  formats:
+    - html
+    - pdf

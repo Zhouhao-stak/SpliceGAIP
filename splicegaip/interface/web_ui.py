@@ -1,0 +1,1812 @@
+"""SpliceGAIP web UI - Modern AI Scientific Workspace.
+
+Redesigned as an interactive multi-agent analysis platform with:
+- 仪表盘 with real-time project status
+- AI 流水线 visualization with agent workflow
+- Results 探索r with filtering and search
+- Independent chart management
+- 基因-level exploration
+
+Backend API remains unchanged (FastAPI endpoints in splicegaip/api/app.py).
+Frontend uses vanilla JS SPA architecture for zero-build deployment.
+"""
+
+from __future__ import annotations
+
+from fastapi.responses import HTMLResponse
+
+_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpliceGAIP - AI 智能分析平台</title>
+<style>
+/* Professional Minimalist Theme - Clean & Restrained */
+:root {
+  /* Monochrome Palette */
+  --black: #000000;
+  --gray-900: #1a1a1a;
+  --gray-700: #4a4a4a;
+  --gray-500: #8a8a8a;
+  --gray-300: #d0d0d0;
+  --gray-100: #f5f5f5;
+  --white: #ffffff;
+
+  /* System Fonts */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, monospace;
+
+  /* Spacing Scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Shadows - Subtle Only */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.1);
+
+  /* Border Radius - Minimal */
+  --radius: 4px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); background: var(--white); color: var(--gray-900); line-height: 1.6; font-size: 15px; -webkit-font-smoothing: antialiased; }
+.app { display: flex; min-height: 100vh; }
+
+/* Sidebar - Light & Clean */
+.sidebar { width: 260px; background: var(--gray-100); border-right: 1px solid var(--gray-300); position: fixed; top: 0; left: 0; bottom: 0; overflow-y: auto; z-index: 100; }
+.main { margin-left: 260px; flex: 1; min-height: 100vh; background: var(--white); }
+.topbar { height: 64px; background: var(--white); border-bottom: 1px solid var(--gray-300); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--space-5); position: sticky; top: 0; z-index: 50; }
+.content { padding: var(--space-6); max-width: 1200px; margin: 0 auto; }
+
+/* Brand - Simple Typography */
+.brand { padding: var(--space-5) var(--space-4); border-bottom: 1px solid var(--gray-300); }
+.brand-name { font-size: 20px; font-weight: 600; color: var(--black); letter-spacing: -0.3px; }
+.brand-tagline { font-size: 11px; color: var(--gray-500); margin-top: var(--space-1); text-transform: uppercase; letter-spacing: 1px; font-weight: 500; }
+
+/* Navigation - Understated */
+.nav-section { padding: var(--space-4) 0; }
+.nav-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--gray-500); padding: 0 var(--space-4); margin-bottom: var(--space-2); }
+.nav-item { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); color: var(--gray-700); cursor: pointer; transition: all 0.2s ease; font-size: 14px; font-weight: 500; border-left: 2px solid transparent; }
+.nav-item:hover { background: var(--white); color: var(--gray-900); }
+.nav-item.active { background: var(--white); color: var(--black); border-left-color: var(--black); font-weight: 600; }
+
+/* Cards - Minimal Borders */
+.card { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius); padding: var(--space-5); }
+.card:hover { box-shadow: var(--shadow-sm); }
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-4); }
+.card-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-500); }
+
+/* Grid System */
+.grid { display: grid; gap: var(--space-5); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* Status Indicators - Subtle */
+.status { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: var(--radius); }
+.status-running { background: var(--gray-100); color: var(--gray-900); }
+.status-completed { background: var(--gray-100); color: var(--gray-900); }
+.status-waiting { background: var(--gray-100); color: var(--gray-500); }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gray-500); }
+.status-running .status-dot { background: var(--black); }
+.status-completed .status-dot { background: var(--gray-900); }
+
+/* Buttons - Functional & Clean */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 10px 20px; font-size: 14px; font-weight: 500; border-radius: var(--radius); border: 1px solid transparent; cursor: pointer; transition: all 0.2s ease; font-family: var(--font-sans); }
+
+/* Primary Button - Black */
+.btn-primary { background: var(--black); color: var(--white); border-color: var(--black); }
+.btn-primary:hover { background: var(--gray-900); border-color: var(--gray-900); }
+
+/* Secondary Button - Outline */
+.btn-secondary { background: transparent; color: var(--gray-900); border-color: var(--gray-300); }
+.btn-secondary:hover { border-color: var(--gray-700); }
+
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+
+/* Tables - Clean Grid */
+.table-container { overflow-x: auto; border: 1px solid var(--gray-100); border-radius: var(--radius); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead { background: var(--gray-100); }
+th { text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--gray-900); border-bottom: 2px solid var(--gray-300); }
+td { padding: 10px 14px; border-bottom: 1px solid var(--gray-100); color: var(--gray-700); }
+tr:last-child td { border-bottom: none; }
+tr:hover { background: var(--gray-100); }
+
+/* Pipeline Steps - Minimal */
+.pipeline { display: flex; flex-direction: column; gap: var(--space-4); }
+.pipeline-step { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4); background: var(--white); border: 1px solid var(--gray-300); border-radius: var(--radius); cursor: pointer; transition: all 0.2s ease; }
+.pipeline-step:hover { border-color: var(--gray-700); }
+.pipeline-step.active { border-color: var(--black); background: var(--gray-100); }
+.pipeline-step.completed { border-color: var(--gray-500); }
+
+.step-number { width: 36px; height: 36px; border-radius: 50%; background: var(--gray-100); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: var(--gray-700); flex-shrink: 0; }
+.pipeline-step.active .step-number { background: var(--black); color: var(--white); }
+.pipeline-step.completed .step-number { background: var(--gray-900); color: var(--white); }
+
+.step-info { flex: 1; }
+.step-name { font-weight: 600; font-size: 14px; margin-bottom: var(--space-1); }
+.step-desc { font-size: 13px; color: var(--gray-500); line-height: 1.5; }
+
+/* Filters & Search */
+.filters { display: flex; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-5); padding: var(--space-4); background: var(--white); border-radius: var(--radius); border: 1px solid var(--gray-300); }
+.filter-group { display: flex; align-items: center; gap: var(--space-2); }
+.filter-label { font-size: 11px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.5px; }
+.checkbox-group { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.checkbox-label { display: flex; align-items: center; gap: var(--space-2); font-size: 13px; cursor: pointer; padding: var(--space-1) var(--space-2); border-radius: var(--radius); }
+.checkbox-label:hover { background: var(--gray-100); }
+input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--black); cursor: pointer; }
+
+.search-bar { display: flex; gap: var(--space-3); margin-bottom: var(--space-5); }
+.search-input { flex: 1; padding: 10px 16px; border: 1px solid var(--gray-300); border-radius: var(--radius); font-size: 14px; font-family: var(--font-sans); }
+.search-input:focus { outline: none; border-color: var(--gray-700); background: var(--white); }
+
+/* Charts & Visualizations */
+.chart-container { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius); padding: var(--space-5); margin-bottom: var(--space-5); }
+.chart-placeholder { height: 360px; background: var(--gray-100); border-radius: var(--radius); display: flex; align-items: center; justify-content: center; color: var(--gray-500); font-size: 14px; }
+
+/* Page Transitions */
+.page { display: none; }
+.page.active { display: block; }
+
+/* Responsive */
+@media (max-width: 1024px) { .sidebar { width: 240px; } .main { margin-left: 240px; } .grid-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 768px) { .sidebar { display: none; } .main { margin-left: 0; } .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } .content { padding: var(--space-4); } }
+
+/* Agent Chat Panel Styles */
+.chat-message { animation: fadeIn 0.3s ease; }
+.message-header { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.agent-icon { font-size: 14px; }
+.agent-name { font-weight: 600; }
+.message-time { color: var(--gray-500); margin-left: auto; font-size: 11px; }
+.message-content { font-size: 13px; line-height: 1.6; margin-top: 6px; }
+.log-entry { margin-bottom: 4px; font-family: var(--font-mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-name">SpliceGAIP</div><div class="brand-tagline">AI 智能分析平台</div></div>
+    <div class="nav-section"><div class="nav-label">主菜单</div>
+      <div class="nav-item active" data-page="dashboard">仪表盘</div>
+      <div class="nav-item" data-page="pipeline">AI 流水线</div>
+      <div class="nav-item" data-page="explorer">事件浏览器</div>
+    </div>
+    <div class="nav-section"><div class="nav-label">分析工具</div>
+      <div class="nav-item" data-page="visualization">可视化</div>
+      <div class="nav-item" data-page="gene">基因浏览器</div>
+      <div class="nav-item" data-page="report">报告</div>
+    </div>
+    <div class="nav-section"><div class="nav-label">智能助手</div>
+      <div class="nav-item" data-page="assistant">🤖 AI 助手</div>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div style="font-size: 14px; color: var(--text-secondary);" id="current-project">未加载项目</div>
+      <div style="display: flex; gap: 12px;">
+        <button class="btn btn-secondary btn-sm" onclick="refreshData()">刷新</button>
+        <button class="btn btn-primary btn-sm" onclick="showUploadModal()">+ 新建分析</button>
+      </div>
+    </div>
+    <div class="content">
+      <div class="page active" id="page-dashboard">
+        <div class="grid grid-4" style="margin-bottom: 32px;">
+          <div class="card">
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-500); margin-bottom: 12px;">总样本数</div>
+            <div style="font-size: 36px; font-weight: 600; color: var(--black);" id="stat-samples">-</div>
+            <div style="font-size: 12px; margin-top: 8px; color: var(--gray-500);">RNA-seq 样本</div>
+          </div>
+          <div class="card">
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-500); margin-bottom: 12px;">剪接事件</div>
+            <div style="font-size: 36px; font-weight: 600; color: var(--black);" id="stat-events">-</div>
+            <div style="font-size: 12px; margin-top: 8px; color: var(--gray-500);">检测到的事件总数</div>
+          </div>
+          <div class="card">
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-500); margin-bottom: 12px;">显著事件</div>
+            <div style="font-size: 36px; font-weight: 600; color: var(--black);" id="stat-significant">-</div>
+            <div style="font-size: 12px; margin-top: 8px; color: var(--gray-500);">FDR < 0.05 & |ΔPSI| > 0.1</div>
+          </div>
+          <div class="card">
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-500); margin-bottom: 12px;">系统状态</div>
+            <div style="margin-top: 8px;" id="stat-status"><span class="status status-waiting"><span class="status-dot"></span>空闲</span></div>
+          </div>
+        </div>
+        <div class="grid grid-2">
+          <div class="card">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+              <div style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary);">当前运行 Agent</div>
+              <div id="current-agent-indicator" style="display: none;"><span class="status status-running"><span class="status-dot"></span>分析中</span></div>
+            </div>
+            <div id="current-agent">
+              <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+                <div style="font-size: 48px; margin-bottom: 12px; opacity: 0.3;">🤖</div>
+                <div style="font-size: 14px;">暂无运行中的分析</div>
+                <button class="btn btn-primary" style="margin-top: 16px;" onclick="showUploadModal()">启动新分析</button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+              <div style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary);">最近项目</div>
+              <button class="btn btn-sm btn-secondary" onclick="loadDashboard()">刷新</button>
+            </div>
+            <div id="recent-projects">
+              <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+                <div style="font-size: 48px; margin-bottom: 12px; opacity: 0.3;">📁</div>
+                <div style="font-size: 14px;">暂无项目</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="page" id="page-pipeline">
+        <div class="card" style="margin-bottom: 24px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+            <div>
+              <div style="font-size: 18px; font-weight: 700;">分析进度</div>
+              <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;" id="pipeline-status-text">等待启动...</div>
+            </div>
+            <div id="pipeline-progress" style="font-size: 24px; font-weight: 800; color: var(--accent);">0%</div>
+          </div>
+          <div style="height: 8px; background: var(--gray-100); border-radius: 4px; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);">
+            <div id="progress-bar" style="height: 100%; width: 0%; background: var(--black); transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 2px 4px rgba(8, 145, 178, 0.3);"></div>
+          </div>
+        </div>
+        
+        <div class="card" style="margin-bottom: 24px;">
+          <div style="font-size: 14px; font-weight: 700; margin-bottom: 16px; color: var(--text);">Agent 工作流</div>
+          <div class="pipeline" id="pipeline-steps">
+            <div class="pipeline-step waiting">
+              <div class="step-number">1</div>
+              <div class="step-info">
+                <div class="step-name">📊 数据 Agent</div>
+                <div class="step-desc">加载并验证输入数据，检查文件格式和完整性</div>
+              </div>
+              <span class="status status-waiting"><span class="status-dot"></span>等待中</span>
+            </div>
+            <div class="pipeline-step waiting">
+              <div class="step-number">2</div>
+              <div class="step-info">
+                <div class="step-name">✅ 质控 Agent</div>
+                <div class="step-desc">执行质量控制检查，过滤低质量样本</div>
+              </div>
+              <span class="status status-waiting"><span class="status-dot"></span>等待中</span>
+            </div>
+            <div class="pipeline-step waiting">
+              <div class="step-number">3</div>
+              <div class="step-info">
+                <div class="step-name">🔬 剪接检测 Agent</div>
+                <div class="step-desc">使用统计模型检测可变剪接事件</div>
+              </div>
+              <span class="status status-waiting"><span class="status-dot"></span>等待中</span>
+            </div>
+            <div class="pipeline-step waiting">
+              <div class="step-number">4</div>
+              <div class="step-info">
+                <div class="step-name">📈 统计 Agent</div>
+                <div class="step-desc">计算显著性（FDR）和效应量（Delta PSI）</div>
+              </div>
+              <span class="status status-waiting"><span class="status-dot"></span>等待中</span>
+            </div>
+            <div class="pipeline-step waiting">
+              <div class="step-number">5</div>
+              <div class="step-info">
+                <div class="step-name">🧬 注释 Agent</div>
+                <div class="step-desc">功能注释、通路富集和文献证据收集</div>
+              </div>
+              <span class="status status-waiting"><span class="status-dot"></span>等待中</span>
+            </div>
+            <div class="pipeline-step waiting">
+              <div class="step-number">6</div>
+              <div class="step-info">
+                <div class="step-name">🤖 解读 Agent</div>
+                <div class="step-desc">生成生物学解读和专业分析报告</div>
+              </div>
+              <span class="status status-waiting"><span class="status-dot"></span>等待中</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="page" id="page-explorer">
+        <div class="card" style="margin-bottom: 24px;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 20px;">筛选条件</div>
+          <div class="search-bar" style="margin-bottom: 20px;">
+            <input type="text" class="search-input" placeholder="搜索基因名称、事件ID或染色体位置..." id="search-input" onkeypress="if(event.key==='Enter') applyFilters()">
+            <button class="btn btn-primary" onclick="applyFilters()">🔍 应用筛选</button>
+          </div>
+          <div class="filters" style="margin-bottom: 0;">
+            <div class="filter-group">
+              <div class="filter-label">事件类型</div>
+              <div class="checkbox-group">
+                <label class="checkbox-label"><input type="checkbox" value="SE" checked> SE (外显子跳跃)</label>
+                <label class="checkbox-label"><input type="checkbox" value="MXE" checked> MXE (互斥外显子)</label>
+                <label class="checkbox-label"><input type="checkbox" value="A3SS" checked> A3SS (可变3'剪接)</label>
+                <label class="checkbox-label"><input type="checkbox" value="A5SS" checked> A5SS (可变5'剪接)</label>
+                <label class="checkbox-label"><input type="checkbox" value="RI" checked> RI (内含子保留)</label>
+              </div>
+            </div>
+            <div class="filter-group">
+              <div class="filter-label">统计阈值</div>
+              <div style="display: flex; gap: 20px;">
+                <label class="checkbox-label"><input type="checkbox" id="filter-fdr" checked> FDR &lt; 0.05</label>
+                <label class="checkbox-label"><input type="checkbox" id="filter-dpsi" checked> |Delta PSI| &gt; 0.1</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>事件 ID</th>
+                <th>基因</th>
+                <th>类型</th>
+                <th>Delta PSI</th>
+                <th>FDR</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="events-table">
+              <tr>
+                <td colspan="6" style="text-align: center; padding: 60px; color: var(--text-muted);">
+                  <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;">📋</div>
+                  <div style="font-size: 16px; font-weight: 600;">未加载事件数据</div>
+                  <div style="font-size: 14px; margin-top: 8px;">请完成分析后查看结果</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="page" id="page-visualization">
+        <div class="grid grid-2">
+          <div>
+            <div class="card" style="margin-bottom: 20px;">
+              <div style="font-size: 15px; font-weight: 700; margin-bottom: 6px; color: var(--text);">📊 核心统计图</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 14px;">差异剪接的显著性与效应量</div>
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn btn-secondary" onclick="loadChart('volcano')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🌋 火山图 Volcano</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">ΔPSI vs -log10(FDR)，标注显著性阈值</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('dpsi_waterfall')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">💧 ΔPSI 瀑布图 Waterfall</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">Top 25 效应量排序，区分包含上调/下调</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('dpsi_ecdf')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">📈 ΔPSI 累积分布 ECDF</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">效应量经验累积分布与阈值占比</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('fdr_scree')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🪜 显著性碎石图 Scree</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">候选排名 vs -log10(FDR)，定位显著性拐点</div></div>
+                </button>
+              </div>
+            </div>
+            <div class="card" style="margin-bottom: 20px;">
+              <div style="font-size: 15px; font-weight: 700; margin-bottom: 6px; color: var(--text);">🧬 事件组成与机制</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 14px;">剪接事件类型构成与分子机制</div>
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn btn-secondary" onclick="loadChart('event_type_counts')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">📊 事件类型分布</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">SE/MXE/A5SS/A3SS/RI 五类事件计数</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('event_significance')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🎯 类型×显著性堆叠图</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">各类型中显著与非显著事件构成</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('event_schematic')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🧩 剪接机制示意图 Schematic</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">五类可变剪接的外显子-内含子结构模式图</div></div>
+                </button>
+              </div>
+            </div>
+            <div class="card" style="margin-bottom: 20px;">
+              <div style="font-size: 15px; font-weight: 700; margin-bottom: 6px; color: var(--text);">🔬 样本与质控</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 14px;">队列构成与样本水平 PSI 模式</div>
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn btn-secondary" onclick="loadChart('psi_heatmap')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🌡️ PSI 热图 Heatmap</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">Top 事件逐样本 PSI 聚类热图</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('psi_distribution')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">📦 分组 PSI 箱线图</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">各组 PSI 分布与离群样本检测</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('sample_composition')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🥧 队列构成图</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">分组占比与批次分布（QC 必备）</div></div>
+                </button>
+              </div>
+            </div>
+            <div class="card">
+              <div style="font-size: 15px; font-weight: 700; margin-bottom: 6px; color: var(--text);">🤖 AI 排序与功能富集</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 14px;">智能体候选评分与通路注释</div>
+              <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn btn-secondary" onclick="loadChart('candidate_ranking')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🏆 候选基因排名</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">综合评分 Top 15 候选事件条形图</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('score_components')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🧮 评分分解堆叠图</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">显著性/效应/生物学/文献四维贡献</div></div>
+                </button>
+                <button class="btn btn-secondary" onclick="loadChart('enrichment')" style="justify-content: flex-start; padding: 12px 16px; text-align: left;">
+                  <div><div style="font-weight: 700; margin-bottom: 2px;">🕸️ 功能富集点图</div><div style="font-size: 11px; color: var(--text-secondary); font-weight: 500;">GO/KEGG 富集倍数 vs FDR 气泡图</div></div>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="chart-container" id="chart-display" style="min-height: 600px; position: sticky; top: 88px;">
+              <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-muted);">
+                <div style="font-size: 64px; margin-bottom: 20px; opacity: 0.3;">📈</div>
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">选择图表类型</div>
+                <div style="font-size: 14px;">左侧共 13 张专业科研图，点击即可渲染</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="page" id="page-gene">
+        <div class="search-bar">
+          <input type="text" class="search-input" placeholder="输入基因符号（如 TP53、BRCA1、MYC）..." id="gene-search" onkeypress="if(event.key==='Enter') exploreGene()">
+          <button class="btn btn-primary" onclick="exploreGene()">🔍 探索</button>
+        </div>
+        <div style="margin-bottom: 24px; padding: 20px; background: var(--gray-100); border-radius: var(--radius); border-left: 2px solid var(--gray-700);">
+          <div style="font-size: 13px; font-weight: 700; color: var(--secondary); margin-bottom: 8px;">💡 提示</div>
+          <div style="font-size: 13px; line-height: 1.8; color: var(--text);">
+            输入基因符号查看该基因的所有剪接事件、统计信息和文献证据。支持热门基因如 TP53、BRCA1、MYC、EGFR 等。
+          </div>
+        </div>
+        <div id="gene-details">
+          <div class="card">
+            <div style="padding: 60px; text-align: center; color: var(--text-muted);">
+              <div style="font-size: 64px; margin-bottom: 16px; opacity: 0.3;">🧬</div>
+              <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">探索基因剪接模式</div>
+              <div style="font-size: 14px;">在上方输入基因符号以探索其剪接事件和生物学功能</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="page" id="page-report">
+        <div class="card">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
+            <div>
+              <div style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">生成分析报告</div>
+              <div style="font-size: 13px; color: var(--text-secondary);">基于当前分析结果生成专业报告</div>
+            </div>
+            <div style="display: flex; gap: 12px;">
+              <button class="btn btn-primary" onclick="generateReport('html')">
+                <span>📄 HTML 报告</span>
+              </button>
+              <button class="btn btn-secondary" onclick="generateReport('pdf')">
+                <span>📑 PDF 报告</span>
+              </button>
+            </div>
+          </div>
+          
+          <div id="report-output">
+            <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+              <div style="font-size: 64px; margin-bottom: 20px; opacity: 0.3;">📊</div>
+              <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">准备生成报告</div>
+              <div style="font-size: 14px;">完成分析后可生成包含统计结果、可视化和生物学解读的专业报告</div>
+            </div>
+          </div>
+          
+          <div style="margin-top: 24px; padding: 20px; background: var(--gray-100); border-radius: var(--radius); border-left: 2px solid var(--black);">
+            <div style="font-size: 13px; font-weight: 700; color: var(--accent); margin-bottom: 8px;">💡 报告内容</div>
+            <div style="font-size: 13px; line-height: 1.8; color: var(--text);">
+              <div>• 项目概览与样本统计</div>
+              <div>• 显著剪接事件列表（FDR < 0.05）</div>
+              <div>• 关键基因的功能注释与通路富集</div>
+              <div>• 可视化图表（火山图、热图、分布图）</div>
+              <div>• AI 生成的生物学解读与建议</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- AI Assistant Page -->
+      <div class="page" id="page-assistant">
+        <div class="grid grid-2" style="height: calc(100vh - 140px);">
+          <!-- Chat Interface -->
+          <div class="card" style="display: flex; flex-direction: column;">
+            <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">🤖 SpliceGAIP 智能助手</div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px;">
+              支持基因注释、文献搜索、通路富集和剪接事件解读等专业技能
+            </div>
+            
+            <!-- Skill Buttons -->
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px;">
+              <button class="btn btn-sm btn-secondary" onclick="loadSkill('gene_annotation')" style="text-align: left; padding: 12px;">
+                <div style="font-size: 16px; margin-bottom: 4px;">🧬</div>
+                <div style="font-size: 13px; font-weight: 600;">基因注释</div>
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="loadSkill('literature_search')" style="text-align: left; padding: 12px;">
+                <div style="font-size: 16px; margin-bottom: 4px;">📚</div>
+                <div style="font-size: 13px; font-weight: 600;">文献搜索</div>
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="loadSkill('pathway_enrichment')" style="text-align: left; padding: 12px;">
+                <div style="font-size: 16px; margin-bottom: 4px;">🔬</div>
+                <div style="font-size: 13px; font-weight: 600;">通路富集</div>
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="loadSkill('splice_interpretation')" style="text-align: left; padding: 12px;">
+                <div style="font-size: 16px; margin-bottom: 4px;">⚕️</div>
+                <div style="font-size: 13px; font-weight: 600;">剪接解读</div>
+              </button>
+            </div>
+            
+            <!-- Chat Messages -->
+            <div id="chat-messages" style="flex: 1; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: #f8fafc; margin-bottom: 16px;">
+              <div style="padding: 12px; margin-bottom: 12px; background: white; border-radius: var(--radius); box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                <div style="font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 4px;">🤖 SpliceGAIP</div>
+                <div style="font-size: 14px; line-height: 1.6;">
+                  你好！我是 SpliceGAIP 智能助手，可以帮助你：<br>
+                  • 查询基因注释和剪接位点信息<br>
+                  • 搜索相关科学文献<br>
+                  • 执行通路富集分析<br>
+                  • 解读剪接事件的临床意义<br><br>
+                  请选择上方的技能按钮开始，或直接输入你的问题。
+                </div>
+              </div>
+            </div>
+            
+            <!-- Chat Input -->
+            <div style="display: flex; gap: 12px;">
+              <input type="text" id="chat-input" placeholder="输入问题或选择上方技能..." 
+                     style="flex: 1; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 14px;"
+                     onkeypress="if(event.key==='Enter') sendChatMessage()">
+              <button class="btn btn-primary" onclick="sendChatMessage()">发送</button>
+            </div>
+          </div>
+          
+          <!-- Results Panel -->
+          <div class="card" style="overflow-y: auto;">
+            <div style="font-size: 18px; font-weight: 700; margin-bottom: 16px;">📊 分析结果</div>
+            <div id="skill-results">
+              <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+                <div style="font-size: 64px; margin-bottom: 20px; opacity: 0.3;">📈</div>
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">等待分析结果</div>
+                <div style="font-size: 14px;">选择左侧的技能按钮执行专业分析</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Upload Modal -->
+<div id="upload-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--white); z-index: 1000; align-items: center; justify-content: center;">
+  <div style="background: var(--white); border: 1px solid var(--gray-300); border-radius: var(--radius); padding: 32px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+      <h2 style="font-size: 20px; font-weight: 600; color: var(--black);">新建分析项目</h2>
+      <button onclick="closeUploadModal()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--gray-700);">×</button>
+    </div>
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--gray-700);">项目名称</label>
+      <input type="text" id="project-name" placeholder="输入项目名称（如 My_RNA_Study）" style="width: 100%; padding: 10px; border: 1px solid var(--gray-300); border-radius: var(--radius); font-size: 14px; font-family: var(--font-sans); color: var(--gray-900); background: var(--white);">
+    </div>
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--gray-700);">分析查询</label>
+      <input type="text" id="analysis-query" placeholder="输入分析查询（如 compare treatment vs control）" style="width: 100%; padding: 10px; border: 1px solid var(--gray-300); border-radius: var(--radius); font-size: 14px; font-family: var(--font-sans); color: var(--gray-900); background: var(--white);">
+    </div>
+    <div style="margin-bottom: 24px;">
+      <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--gray-700);">上传文件</label>
+      <div id="drop-zone" style="border: 2px dashed var(--gray-300); border-radius: var(--radius); padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--gray-100);" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)" onclick="document.getElementById('file-input').click()">
+        <div style="font-size: 48px; margin-bottom: 12px;">📁</div>
+        <div style="font-size: 14px; color: var(--gray-700);">拖拽文件到此处，或点击选择文件</div>
+        <div style="font-size: 12px; color: var(--gray-500); margin-top: 8px;">支持 BAM、FASTQ、GTF 等格式</div>
+      </div>
+      <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileSelect(event)">
+      <div id="file-list" style="margin-top: 12px;"></div>
+    </div>
+    <div style="display: flex; gap: 12px; justify-content: flex-end;">
+      <button class="btn btn-secondary" onclick="closeUploadModal()">取消</button>
+      <button class="btn btn-primary" id="start-analysis-btn" onclick="startAnalysis()" disabled>开始分析</button>
+    </div>
+  </div>
+</div>
+
+<script src="agent_chat_ui.js"></script>
+<script>
+const state = { currentProject: null, projects: [], analysis状态: null, events: [], currentPage: 'dashboard' };
+document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => { navigateTo(item.dataset.page); }); });
+function navigateTo(page) {
+  document.querySelectorAll('.nav-item').forEach(item => { item.classList.toggle('active', item.dataset.page === page); });
+  document.querySelectorAll('.page').forEach(p => { p.classList.toggle('active', p.id === `page-${page}`); });
+  state.currentPage = page;
+  if (page === 'dashboard') loadDashboard();
+  if (page === 'pipeline') loadPipeline();
+  if (page === 'explorer') loadExplorer();
+}
+async function apiCall(endpoint, options = {}) {
+  try { const response = await fetch(`/api${endpoint}`, { headers: { 'Content-Type': 'application/json' }, ...options }); return await response.json(); }
+  catch (error) { console.error('API Error:', error); return null; }
+}
+async function loadDashboard() {
+  const response = await apiCall('/projects');
+  const projectsData = response.projects || response || [];
+  state.projects = Array.isArray(projectsData) ? projectsData : [];
+  
+  // Get latest project status for stats
+  if (state.projects.length > 0) {
+    const latestProject = state.projects[0];
+    const status = await apiCall(`/status/${latestProject.project_id}`);
+    
+    if (status) {
+      document.getElementById('stat-samples').textContent = (status.samples || []).length;
+      document.getElementById('stat-events').textContent = status.events || 0;
+      
+      // Count significant events from candidates
+      const candidates = status.candidates || [];
+      const significantCount = candidates.filter(c => c.fdr < 0.05 && Math.abs(c.delta_psi || 0) > 0.1).length;
+      document.getElementById('stat-significant').textContent = significantCount || candidates.length || 0;
+      
+      // Update current project
+      state.currentProject = latestProject.project_id;
+      document.getElementById('current-project').textContent = latestProject.name || latestProject.project_id;
+    }
+  } else {
+    document.getElementById('stat-samples').textContent = '-';
+    document.getElementById('stat-events').textContent = '-';
+    document.getElementById('stat-significant').textContent = '-';
+  }
+  
+  const projectsList = document.getElementById('recent-projects');
+  if (state.projects.length === 0) { 
+    projectsList.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">暂无项目</div>'; 
+  } else { 
+    projectsList.innerHTML = state.projects.slice(0, 5).map(p => 
+      `<div style="padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer;" onclick="selectProject('${p.project_id}')">
+        <div style="font-weight: 600;">${p.name || p.project_id}</div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${p.query || '分析查询'}</div>
+      </div>`
+    ).join(''); 
+  }
+}
+async function loadPipeline() {
+  if (!state.currentProject) return;
+  const status = await apiCall(`/status/${state.currentProject}`);
+  state.analysis状态 = status;
+  if (status) updatePipelineUI(status);
+}
+function updatePipelineUI(status) {
+  const steps = document.querySelectorAll('.pipeline-step');
+  
+  // Try to get current_step from status, or infer from logs
+  let currentStep = status.current_step;
+  let statusText = '等待启动...';
+  
+  if (currentStep === undefined || currentStep === null) {
+    // Infer step from logs
+    const logs = status.logs || [];
+    const actions = logs.map(l => l.action);
+    
+    if (actions.includes('run_finished')) {
+      currentStep = steps.length; // All steps completed
+      statusText = '分析已完成';
+    } else if (actions.includes('interpret_candidates') || actions.includes('generate_report')) {
+      currentStep = 5; // Interpretation done
+      statusText = '解读 Agent 正在生成生物学解读...';
+    } else if (actions.includes('collect_literature_evidence')) {
+      currentStep = 4;
+      statusText = '注释 Agent 正在收集文献证据...';
+    } else if (actions.includes('run_enrichment')) {
+      currentStep = 4;
+      statusText = '注释 Agent 正在进行通路富集分析...';
+    } else if (actions.includes('rank_candidates')) {
+      currentStep = 3;
+      statusText = '统计 Agent 正在排序候选事件...';
+    } else if (actions.includes('filter_significant_events')) {
+      currentStep = 3;
+      statusText = '剪接检测 Agent 正在筛选显著事件...';
+    } else if (actions.includes('summarize_dataset')) {
+      currentStep = 2;
+      statusText = '质控 Agent 正在进行质量检查...';
+    } else if (actions.includes('understand_query')) {
+      currentStep = 1;
+      statusText = '数据 Agent 正在理解查询...';
+    } else if (actions.includes('run_started')) {
+      currentStep = 0;
+      statusText = '分析已启动，准备中...';
+    } else {
+      currentStep = 0;
+      statusText = '等待启动...';
+    }
+  } else {
+    const stepNames = ['数据加载', '质量控制', '剪接检测', '统计分析', '功能注释', '生物学解读'];
+    statusText = currentStep < stepNames.length ? `正在执行: ${stepNames[currentStep]}` : '处理中...';
+  }
+  
+  document.getElementById('pipeline-status-text').textContent = statusText;
+  
+  const totalSteps = steps.length;
+  const progress = Math.round((currentStep / totalSteps) * 100);
+  document.getElementById('pipeline-progress').textContent = `${progress}%`;
+  document.getElementById('progress-bar').style.width = `${progress}%`;
+  
+  steps.forEach((step, index) => {
+    step.classList.remove('waiting', 'active', 'completed');
+    if (index < currentStep) { 
+      step.classList.add('completed'); 
+      step.querySelector('.status').className = 'status status-completed'; 
+      step.querySelector('.status').innerHTML = '<span class="status-dot"></span>已完成'; 
+    } else if (index === currentStep && currentStep < totalSteps) { 
+      step.classList.add('active'); 
+      step.querySelector('.status').className = 'status status-running'; 
+      step.querySelector('.status').innerHTML = '<span class="status-dot"></span>运行中'; 
+    } else { 
+      step.classList.add('waiting'); 
+      step.querySelector('.status').className = 'status status-waiting'; 
+      step.querySelector('.status').innerHTML = '<span class="status-dot"></span>等待中'; 
+    }
+  });
+}
+async function loadExplorer() {
+  if (!state.currentProject) return;
+  const status = await apiCall(`/status/${state.currentProject}`);
+  if (status && status.candidates) { 
+    state.events = status.candidates; 
+    renderEventsTable(state.events); 
+  } else if (status && status.events) {
+    // Fallback: try to get events from status
+    state.events = [];
+    renderEventsTable(state.events);
+  }
+}
+function renderEventsTable(events) {
+  const tbody = document.getElementById('events-table');
+  if (!events || events.length === 0) { 
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-muted);">未找到匹配的事件</td></tr>'; 
+    return; 
+  }
+  tbody.innerHTML = events.map(event => {
+    const eventId = event.event_id || event.id || '-';
+    const gene = event.gene_symbol || event.gene || event.gene_id || '-';
+    const eventType = event.event_type || event.type || '-';
+    const dpsi = (event.delta_psi !== null && event.delta_psi !== undefined) ? Number(event.delta_psi).toFixed(3) : '-';
+    const fdr = (event.fdr !== null && event.fdr !== undefined) ? Number(event.fdr).toExponential(2) : '-';
+    return `<tr>
+      <td>${eventId}</td>
+      <td><strong>${gene}</strong></td>
+      <td>${eventType}</td>
+      <td>${dpsi}</td>
+      <td>${fdr}</td>
+      <td><button class="btn btn-sm btn-secondary" onclick="viewEventDetails('${eventId}')">查看</button></td>
+    </tr>`;
+  }).join('');
+}
+function applyFilters() {
+  const searchTerm = document.getElementById('search-input').value.toLowerCase();
+  const selected类型s = Array.from(document.querySelectorAll('.checkbox-group input:checked')).map(cb => cb.value);
+  const filterFDR = document.getElementById('filter-fdr').checked;
+  const filterDPSI = document.getElementById('filter-dpsi').checked;
+  let filtered = state.events || [];
+  if (searchTerm) { filtered = filtered.filter(e => { const gene = e.gene_symbol || e.gene || ''; const id = e.event_id || e.id || ''; return gene.toLowerCase().includes(searchTerm) || id.toLowerCase().includes(searchTerm); }); }
+  if (selected类型s.length > 0) { filtered = filtered.filter(e => selected类型s.includes(e.event_type || e.type)); }
+  if (filterFDR) { filtered = filtered.filter(e => e.fdr !== null && e.fdr !== undefined && e.fdr < 0.05); }
+  if (filterDPSI) { filtered = filtered.filter(e => e.delta_psi !== null && e.delta_psi !== undefined && Math.abs(e.delta_psi) > 0.1); }
+  renderEventsTable(filtered);
+}
+function loadChart(chartType) {
+  const container = document.getElementById('chart-display');
+  if (!state.currentProject) { 
+    container.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 600px; color: var(--text-muted);">
+        <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;">⚠️</div>
+        <div style="font-size: 16px; font-weight: 600;">未选择项目</div>
+        <div style="font-size: 14px; margin-top: 8px;">请先在仪表盘选择一个分析项目</div>
+      </div>`; 
+    return; 
+  }
+  
+  const meta = {
+    volcano: ['火山图 Volcano Plot', '以 ΔPSI 为横轴、-log10(FDR) 为纵轴展示全部剪接事件；虚线为 FDR=0.05 与 |ΔPSI|=0.1 阈值，橙色点为显著事件。'],
+    dpsi_waterfall: ['ΔPSI 瀑布图 Waterfall', '按 |ΔPSI| 排序的 Top 25 候选事件；橙色为包含水平上调，蓝色为下调，直观展示效应量谱。'],
+    dpsi_ecdf: ['ΔPSI 累积分布 ECDF', 'ΔPSI 的经验累积分布曲线，并标注 |ΔPSI|>0.1 的事件占比，用于评估整体效应量分布。'],
+    fdr_scree: ['显著性碎石图 Scree Plot', '候选排名对 -log10(FDR) 曲线，配合 FDR=0.05 参考线定位显著性拐点（elbow）。'],
+    event_type_counts: ['事件类型分布 Composition', 'SE / MXE / A5SS / A3SS / RI 五类可变剪接事件的检出计数。'],
+    event_significance: ['类型 × 显著性堆叠图', '各事件类型中通过阈值（FDR<0.05 且 |ΔPSI|>0.1）的显著事件与非显著事件构成。'],
+    event_schematic: ['剪接机制示意图 Schematic', '五类可变剪接事件的外显子-内含子结构模式图（methods 级示意图）。'],
+    psi_heatmap: ['PSI 热图 Heatmap', 'Top |ΔPSI| 事件的逐样本 PSI 热图，列上方标注样本分组，用于观察聚类模式。'],
+    psi_distribution: ['分组 PSI 箱线图 Box Plot', '按实验组拆分的 Top 事件 PSI 分布（箱线 + 散点），用于识别离群样本。'],
+    sample_composition: ['队列构成图 Cohort QC', '样本分组占比（环图）与批次分布（条形），为质控必备图表。'],
+    candidate_ranking: ['候选基因排名 Ranking', 'AI 智能体综合评分（显著性+效应+生物学+文献）Top 15 候选事件。'],
+    score_components: ['评分分解堆叠图 Decomposition', 'Top 候选的四维评分贡献分解：显著性 / 效应量 / 生物学 / 文献证据。'],
+    enrichment: ['功能富集点图 Dot Plot', 'GO/KEGG 富集结果：横轴为富集倍数，颜色为 -log10(FDR)，点大小为重叠基因数。']
+  };
+  const info = meta[chartType] || ['图表', ''];
+  
+  container.innerHTML = `
+    <div style="padding: 24px;">
+      <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--text);">${info[0]}</div>
+      <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6;">${info[1]}</div>
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 500px; background: var(--gray-100); border-radius: var(--radius);">
+        <div style="width: 48px; height: 48px; border: 4px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+        <div style="margin-top: 20px; font-size: 14px; color: var(--text-secondary);">正在渲染图表（首次生成约需数秒）...</div>
+      </div>
+    </div>
+  `;
+  
+  const img = document.createElement('img');
+  img.src = '/api/figure/' + state.currentProject + '/' + chartType;
+  img.style.width = '100%';
+  img.style.borderRadius = 'var(--radius)';
+  img.style.marginTop = '20px';
+  img.style.boxShadow = 'var(--shadow)';
+  
+  img.onload = function() {
+    container.innerHTML = `
+      <div style="padding: 24px;">
+        <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px; color: var(--text);">${info[0]}</div>
+        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6;">${info[1]}</div>
+      </div>
+    `;
+    container.appendChild(img);
+  };
+  
+  img.onerror = function() { 
+    container.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 600px; color: var(--text-muted);">
+        <div style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;">📊</div>
+        <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">图表不可用</div>
+        <div style="font-size: 14px;">该项目可能尚未生成此图表，请完成分析后重试</div>
+      </div>
+    `; 
+  };
+}
+async function exploreGene() {
+  const geneSymbol = document.getElementById('gene-search').value.trim();
+  if (!geneSymbol) {
+    alert('请输入基因符号');
+    return;
+  }
+  
+  const container = document.getElementById('gene-details');
+  if (!state.currentProject) {
+    container.innerHTML = `
+      <div class="card">
+        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 48px; margin-bottom: 12px; opacity: 0.3;">⚠️</div>
+          <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">请先选择项目</div>
+          <div style="font-size: 14px;">在仪表盘选择一个分析项目后再探索基因</div>
+        </div>
+      </div>`;
+    return;
+  }
+  
+  // Show loading state
+  container.innerHTML = `
+    <div class="card">
+      <div style="padding: 60px; text-align: center;">
+        <div style="width: 48px; height: 48px; border: 4px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+        <div style="font-size: 16px; font-weight: 600;">正在加载 ${geneSymbol} 的信息...</div>
+      </div>
+    </div>`;
+  
+  const status = await apiCall(`/status/${state.currentProject}`);
+  const candidates = (status && status.candidates) || [];
+  const geneEvents = candidates.filter(e => (e.gene_symbol || '').toLowerCase() === geneSymbol.toLowerCase());
+  
+  if (geneEvents.length === 0) {
+    container.innerHTML = `
+      <div class="card">
+        <div style="padding: 60px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 64px; margin-bottom: 16px; opacity: 0.3;">🔍</div>
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 8px;">未找到 ${geneSymbol} 的剪接事件</div>
+          <div style="font-size: 14px;">该基因可能不在当前分析的候选列表中，或未达到显著性阈值</div>
+          <button class="btn btn-secondary" style="margin-top: 20px;" onclick="navigateTo('explorer')">浏览所有事件</button>
+        </div>
+      </div>`;
+    return;
+  }
+  
+  // Sort events by significance
+  geneEvents.sort((a, b) => (a.fdr || 1) - (b.fdr || 1));
+  
+  // Calculate summary statistics
+  const significantEvents = geneEvents.filter(e => e.fdr < 0.05);
+  const avgDeltaPSI = geneEvents.reduce((sum, e) => sum + Math.abs(parseFloat(e.delta_psi || 0)), 0) / geneEvents.length;
+  const eventTypeCounts = {};
+  geneEvents.forEach(e => {
+    const type = e.event_type || 'Unknown';
+    eventTypeCounts[type] = (eventTypeCounts[type] || 0) + 1;
+  });
+  
+  // Build event types summary
+  const eventTypeSummary = Object.entries(eventTypeCounts).map(([type, count]) => `${type}: ${count}`).join(', ');
+  
+  let eventsHtml = `
+    <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+      <thead>
+        <tr style="border-bottom: 2px solid var(--border);">
+          <th style="text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary);">事件 ID</th>
+          <th style="text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary);">类型</th>
+          <th style="text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary);">Delta PSI</th>
+          <th style="text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary);">FDR</th>
+          <th style="text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary);">评分</th>
+          <th style="text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-secondary);">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${geneEvents.map(e => {
+          const dpsi = Number(e.delta_psi).toFixed(3);
+          const fdr = Number(e.fdr).toExponential(2);
+          const score = e.score !== undefined ? Number(e.score).toFixed(3) : '-';
+          const sigLevel = e.fdr < 0.001 ? '***' : e.fdr < 0.01 ? '**' : e.fdr < 0.05 ? '*' : '';
+          const sigColor = e.fdr < 0.001 ? '#dc2626' : e.fdr < 0.01 ? '#f59e0b' : e.fdr < 0.05 ? '#059669' : '#94a3b8';
+          
+          return `<tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding: 12px 16px; font-family: monospace;">${e.event_id || '-'}</td>
+            <td style="padding: 12px 16px;"><span style="background: var(--bg); padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;">${e.event_type || '-'}</span></td>
+            <td style="padding: 12px 16px; font-family: monospace; font-weight: 600;">${dpsi}</td>
+            <td style="padding: 12px 16px; font-family: monospace; font-weight: 600; color: ${sigColor};">${fdr} ${sigLevel}</td>
+            <td style="padding: 12px 16px; font-family: monospace;">${score}</td>
+            <td style="padding: 12px 16px;"><button class="btn btn-sm btn-secondary" onclick="viewEventDetails('${e.event_id || e.id}')">详情</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  
+  // Process evidence
+  let evidence = geneEvents.length > 0 ? (geneEvents[0].evidence_json || '') : '';
+  if (evidence) {
+    try {
+      const parsed = typeof evidence === 'string' ? JSON.parse(evidence) : evidence;
+      if (Array.isArray(parsed)) { 
+        evidence = parsed.map(item => `<div style="margin-bottom: 10px; padding-left: 16px; border-left: 3px solid var(--accent);">• ${typeof item === 'string' ? item : JSON.stringify(item)}</div>`).join(''); 
+      } else if (typeof parsed === 'object') { 
+        evidence = Object.entries(parsed).map(([k, v]) => `<div style="margin-bottom: 10px;"><strong>${k}:</strong> ${v}</div>`).join(''); 
+      }
+    } catch (e) { 
+      evidence = `<div>${evidence}</div>`; 
+    }
+  }
+  
+  container.innerHTML = `
+    <div class="card" style="margin-bottom: 24px;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
+        <div>
+          <div style="font-size: 28px; font-weight: 800; background: var(--black); ">${geneSymbol}</div>
+          <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">基因剪接分析报告</div>
+        </div>
+        <button class="btn btn-secondary" onclick="navigateTo('explorer')">返回事件列表</button>
+      </div>
+      
+      <div class="grid grid-3" style="margin-bottom: 28px;">
+        <div style="background: var(--gray-100); padding: 20px; border-radius: var(--radius); text-align: center;">
+          <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #0e7490; font-weight: 700; margin-bottom: 8px;">总事件数</div>
+          <div style="font-size: 32px; font-weight: 800; color: #0e7490;">${geneEvents.length}</div>
+        </div>
+        <div style="background: var(--gray-100); padding: 20px; border-radius: var(--radius); text-align: center;">
+          <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #065f46; font-weight: 700; margin-bottom: 8px;">显著事件</div>
+          <div style="font-size: 32px; font-weight: 800; color: #065f46;">${significantEvents.length}</div>
+        </div>
+        <div style="background: var(--gray-100); padding: 20px; border-radius: var(--radius); text-align: center;">
+          <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #7c3aed; font-weight: 700; margin-bottom: 8px;">平均 |ΔPSI|</div>
+          <div style="font-size: 32px; font-weight: 800; color: #7c3aed;">${avgDeltaPSI.toFixed(3)}</div>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 24px; padding: 16px; background: var(--bg); border-radius: var(--radius);">
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-secondary); margin-bottom: 8px;">事件类型分布</div>
+        <div style="font-size: 14px; line-height: 1.6;">${eventTypeSummary}</div>
+      </div>
+      
+      <div style="margin-bottom: 24px;">
+        <div style="font-size: 14px; font-weight: 700; margin-bottom: 16px; color: var(--text);">剪接事件详情</div>
+        ${eventsHtml}
+      </div>
+      
+      ${evidence ? `
+      <div>
+        <div style="font-size: 14px; font-weight: 700; margin-bottom: 16px; color: var(--text);">文献证据</div>
+        <div style="padding: 20px; background: var(--bg); border-radius: var(--radius); font-size: 14px; line-height: 1.8;">
+          ${evidence}
+        </div>
+      </div>
+      ` : ''}
+    </div>
+  `;
+}
+async function generateReport(format) {
+  if (!state.currentProject) { 
+    alert('请先选择一个项目'); 
+    return; 
+  }
+  
+  const output = document.getElementById('report-output');
+  output.innerHTML = `
+    <div style="padding: 40px; text-align: center;">
+      <div style="width: 48px; height: 48px; border: 4px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+      <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">正在生成报告...</div>
+      <div style="font-size: 13px; color: var(--text-secondary);">这可能需要几分钟时间，请耐心等待</div>
+    </div>
+  `;
+  
+  try {
+    const reportUrl = `/api/report/${state.currentProject}?format=${format}`;
+    const response = await fetch(reportUrl, { method: 'GET' });
+    
+    if (!response.ok) {
+      throw new Error(`报告生成失败 (${response.status})`);
+    }
+    
+    // Get blob and create download link
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${state.currentProject}_report.${format === 'html' ? 'html' : 'pdf'}`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    
+    output.innerHTML = `
+      <div style="padding: 24px; background: var(--gray-100); border-radius: var(--radius); border-left: 2px solid var(--gray-900);">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <div style="font-size: 24px;">✅</div>
+          <div>
+            <div style="font-size: 16px; font-weight: 700; color: var(--success);">报告生成成功！</div>
+            <div style="font-size: 13px; color: var(--text-secondary);">文件已自动下载</div>
+          </div>
+        </div>
+        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(5, 150, 105, 0.2);">
+          <button class="btn btn-sm btn-primary" onclick="window.open('${reportUrl}', '_blank')">在新窗口中查看</button>
+        </div>
+      </div>
+    `;
+  } catch (error) { 
+    console.error('Report generation error:', error);
+    output.innerHTML = `
+      <div style="padding: 24px; background: var(--gray-100); border-radius: var(--radius); border-left: 2px solid var(--gray-900);">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+          <div style="font-size: 24px;">❌</div>
+          <div>
+            <div style="font-size: 16px; font-weight: 700; color: var(--error);">报告生成失败</div>
+            <div style="font-size: 13px; color: var(--text-secondary);">${error.message}</div>
+          </div>
+        </div>
+        <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(220, 38, 38, 0.2);">
+          <button class="btn btn-sm btn-secondary" onclick="generateReport('${format}')">重试</button>
+        </div>
+      </div>
+    `; 
+  }
+}
+function selectProject(projectId) { state.currentProject = projectId; document.getElementById('current-project').textContent = projectId; loadDashboard(); }
+function refreshData() { if (state.currentPage === 'dashboard') loadDashboard(); if (state.currentPage === 'pipeline') loadPipeline(); if (state.currentPage === 'explorer') loadExplorer(); }
+
+// Upload Modal Functions
+let selectedFiles = [];
+
+function showUploadModal() {
+  document.getElementById('upload-modal').style.display = 'flex';
+  selectedFiles = [];
+  updateFileList();
+}
+
+function closeUploadModal() {
+  document.getElementById('upload-modal').style.display = 'none';
+  document.getElementById('project-name').value = '';
+  document.getElementById('analysis-query').value = '';
+  selectedFiles = [];
+  updateFileList();
+}
+
+function handleDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const dropZone = document.getElementById('drop-zone');
+  dropZone.style.borderColor = 'var(--accent)';
+  dropZone.style.background = '#eff6ff';
+}
+
+function handleDragLeave(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const dropZone = document.getElementById('drop-zone');
+  dropZone.style.borderColor = 'var(--border)';
+  dropZone.style.background = '';
+}
+
+function handleDrop(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const dropZone = document.getElementById('drop-zone');
+  dropZone.style.borderColor = 'var(--border)';
+  dropZone.style.background = '';
+  
+  const files = Array.from(event.dataTransfer.files);
+  handleFiles(files);
+}
+
+function handleFileSelect(event) {
+  console.log('handleFileSelect called');
+  console.log('event.target:', event.target);
+  console.log('event.target.files:', event.target.files);
+  
+  const files = Array.from(event.target.files);
+  console.log('Converted files array:', files.length, files);
+  
+  handleFiles(files);
+}
+
+function handleFiles(files) {
+  console.log('handleFiles called with', files.length, 'files');
+  selectedFiles = [...selectedFiles, ...files];
+  console.log('selectedFiles now:', selectedFiles.length, selectedFiles.map(f => f.name));
+  updateFileList();
+}
+
+function updateFileList() {
+  const fileListDiv = document.getElementById('file-list');
+  const startBtn = document.getElementById('start-analysis-btn');
+  
+  if (selectedFiles.length === 0) {
+    fileListDiv.innerHTML = '';
+    startBtn.disabled = true;
+  } else {
+    fileListDiv.innerHTML = selectedFiles.map((file, index) => 
+      `<div style="padding: 8px; background: var(--bg); border-radius: var(--radius); margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 13px;">${file.name}</span>
+        <button onclick="removeFile(${index})" style="background: none; border: none; cursor: pointer; color: var(--error); font-size: 18px;">×</button>
+      </div>`
+    ).join('');
+    startBtn.disabled = false;
+  }
+}
+
+function removeFile(index) {
+  selectedFiles.splice(index, 1);
+  updateFileList();
+}
+
+async function startAnalysis() {
+  const projectName = document.getElementById('project-name').value.trim();
+  const analysisQuery = document.getElementById('analysis-query').value.trim();
+  
+  if (!projectName) {
+    alert('请输入项目名称');
+    return;
+  }
+  
+  if (!analysisQuery) {
+    alert('请输入分析查询');
+    return;
+  }
+  
+  if (selectedFiles.length === 0) {
+    alert('请至少选择一个文件');
+    return;
+  }
+  
+  // Save files reference BEFORE closing modal (closeUploadModal clears selectedFiles)
+  const filesToUpload = [...selectedFiles];
+  
+  // Close modal and show loading
+  closeUploadModal();
+  const statusDiv = document.getElementById('stat-status');
+  statusDiv.innerHTML = '<span class="status status-running"><span class="status-dot"></span>上传中...</span>';
+  
+  try {
+    // Step 1: Upload files
+    const formData = new FormData();
+    
+    console.log('Uploading files count:', filesToUpload.length);
+    console.log('Files to upload:', filesToUpload.map(f => f.name));
+    
+    filesToUpload.forEach((file, index) => {
+      console.log(`Adding file ${index}:`, file.name, file.type, file.size);
+      formData.append('files', file, file.name);
+    });
+    
+    // Verify FormData contents
+    for (let [key, value] of formData.entries()) {
+      console.log('FormData entry:', key, value.name, value.size);
+    }
+    
+    const uploadResponse = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData
+      // Don't set Content-Type header - browser will set it with boundary
+    });
+    
+    console.log('Upload response status:', uploadResponse.status);
+    
+    if (!uploadResponse.ok) {
+      const errorText = await uploadResponse.text();
+      console.error('Upload error response:', errorText);
+      throw new Error(`上传失败 (${uploadResponse.status}): ${errorText}`);
+    }
+    
+    const uploadResult = await uploadResponse.json();
+    const uploadDir = uploadResult.upload_dir;
+    
+    console.log('Files uploaded to:', uploadDir);
+    
+    // Step 2: Start analysis. The endpoint runs synchronously for several
+    // minutes, so do NOT block the UI: fire the request, jump to the pipeline
+    // page and poll project status for live progress.
+    const prevLatest = (state.projects && state.projects[0] && state.projects[0].project_id) || null;
+    statusDiv.innerHTML = '<span class="status status-running"><span class="status-dot"></span>分析中（预计 3-6 分钟）...</span>';
+    navigateTo('pipeline');
+    
+    const pollTimer = setInterval(async () => {
+      try {
+        const resp = await apiCall('/projects');
+        const list = (resp && resp.projects) || [];
+        if (list.length > 0 && list[0].project_id !== prevLatest && state.currentProject !== list[0].project_id) {
+          state.currentProject = list[0].project_id;
+          document.getElementById('current-project').textContent = state.currentProject;
+        }
+        if (state.currentProject) loadPipeline();
+      } catch (pollError) { console.warn('poll error:', pollError); }
+    }, 4000);
+    
+    fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: analysisQuery,
+        input_dir: uploadDir,
+        project_name: projectName
+      })
+    }).then(async analyzeResponse => {
+      clearInterval(pollTimer);
+      if (!analyzeResponse.ok) {
+        const errorText = await analyzeResponse.text();
+        statusDiv.innerHTML = '<span class="status status-waiting"><span class="status-dot"></span>空闲</span>';
+        alert(`分析失败 (${analyzeResponse.status}): ${errorText}`);
+        return;
+      }
+      const analyzeResult = await analyzeResponse.json();
+      if (analyzeResult && analyzeResult.project_id) {
+        state.currentProject = analyzeResult.project_id;
+        document.getElementById('current-project').textContent = state.currentProject;
+      }
+      statusDiv.innerHTML = '<span class="status status-completed"><span class="status-dot"></span>已完成</span>';
+      loadPipeline();
+      loadDashboard();
+      alert('分析完成！可在事件浏览器、可视化和报告页面查看结果。');
+    }).catch(fetchError => {
+      clearInterval(pollTimer);
+      console.error('Analysis request error:', fetchError);
+      statusDiv.innerHTML = '<span class="status status-waiting"><span class="status-dot"></span>空闲</span>';
+      alert(`分析请求失败：${fetchError.message}（分析可能仍在后台运行，请稍后刷新查看）`);
+    });
+    
+  } catch (error) {
+    console.error('Analysis error:', error);
+    statusDiv.innerHTML = '<span class="status status-waiting"><span class="status-dot"></span>空闲</span>';
+    alert(`操作失败：${error.message}\n\n请检查：\n1. 文件格式是否正确\n2. 文件大小是否过大\n3. 网络连接是否正常`);
+  }
+}
+
+function viewEventDetails(eventId) { 
+  const event = state.events.find(e => (e.event_id || e.id) === eventId);
+  if (!event) { alert('事件未找到'); return; }
+  
+  const gene = event.gene_symbol || event.gene || 'Unknown';
+  const eventType = event.event_type || event.type || 'Unknown';
+  const dpsi = event.delta_psi !== null && event.delta_psi !== undefined ? Number(event.delta_psi).toFixed(4) : 'N/A';
+  const fdr = event.fdr !== null && event.fdr !== undefined ? Number(event.fdr).toExponential(3) : 'N/A';
+  const pValue = event.p_value !== null && event.p_value !== undefined ? Number(event.p_value).toExponential(3) : 'N/A';
+  const score = event.score !== null && event.score !== undefined ? Number(event.score).toFixed(3) : 'N/A';
+  
+  // Determine significance level
+  let sigLevel = 'ns';
+  let sigColor = '#94a3b8';
+  if (fdr !== 'N/A') {
+    const fdrNum = parseFloat(fdr);
+    if (fdrNum < 0.001) { sigLevel = '***'; sigColor = '#dc2626'; }
+    else if (fdrNum < 0.01) { sigLevel = '**'; sigColor = '#f59e0b'; }
+    else if (fdrNum < 0.05) { sigLevel = '*'; sigColor = '#059669'; }
+  }
+  
+  // Biological interpretation based on delta PSI
+  let biologicalImpact = '';
+  let impactColor = '';
+  const dpsiAbs = Math.abs(parseFloat(dpsi));
+  if (dpsi !== 'N/A') {
+    if (dpsiAbs > 0.3) { biologicalImpact = '强效应 - 可能导致蛋白质功能重大改变'; impactColor = '#dc2626'; }
+    else if (dpsiAbs > 0.15) { biologicalImpact = '中等效应 - 可能影响蛋白质结构域'; impactColor = '#f59e0b'; }
+    else if (dpsiAbs > 0.05) { biologicalImpact = '弱效应 - 可能对功能有轻微影响'; impactColor = '#059669'; }
+    else { biologicalImpact = '微小效应 - 可能无显著生物学影响'; impactColor = '#94a3b8'; }
+  }
+  
+  // Event type descriptions
+  const eventDescriptions = {
+    'SE': '外显子跳跃 (Skipped Exon): 最常见的外显子类型，可能导致蛋白质结构域缺失',
+    'MXE': '互斥外显子 (Mutually Exclusive Exons): 两个相邻外显子中只保留一个',
+    'A3SS': "可变3'剪接位点 (Alternative 3' Splice Site): 影响外显子3'端边界",
+    'A5SS': "可变5'剪接位点 (Alternative 5' Splice Site): 影响外显子5'端边界",
+    'RI': '内含子保留 (Retained Intron): 内含子未被正确移除'
+  };
+  
+  const eventDesc = eventDescriptions[eventType] || '未知剪接事件类型';
+  
+  // Create modal HTML
+  const modalHTML = `
+    <div id="event-detail-modal" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: var(--white); z-index: 2000; display: flex; align-items: center; justify-content: center;">
+      <div style="background: var(--white); border: 1px solid var(--gray-300); border-radius: var(--radius); padding: 0; max-width: 900px; width: 95%; max-height: 90vh; overflow-y: auto;">
+        <!-- Header -->
+        <div style="background: var(--black); padding: 32px; color: white; position: relative;">
+          <button onclick="closeEventModal()" style="position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.2); border: none; width: 36px; height: 36px; border-radius: 50%; color: white; font-size: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.3)'" onmouseout="this.style.background='rgba(255,255,255,0.2)'">×</button>
+          <div style="font-size: 28px; font-weight: 600; margin-bottom: 8px;">${gene}</div>
+          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <span style="background: rgba(255,255,255,0.15); padding: 6px 14px; border-radius: var(--radius); font-size: 13px; font-weight: 500;">${eventType}</span>
+            <span style="background: rgba(255,255,255,0.15); padding: 6px 14px; border-radius: var(--radius); font-size: 13px; font-weight: 500;">FDR ${fdr} ${sigLevel}</span>
+          </div>
+        </div>
+        
+        <!-- Content -->
+        <div style="padding: 32px;">
+          <!-- Key Metrics -->
+          <div class="grid grid-3" style="margin-bottom: 28px;">
+            <div style="background: var(--gray-100); border: 1px solid var(--gray-300); padding: 20px; border-radius: var(--radius); text-align: center;">
+              <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-700); font-weight: 600; margin-bottom: 8px;">Delta PSI</div>
+              <div style="font-size: 32px; font-weight: 600; color: var(--black);">${dpsi}</div>
+            </div>
+            <div style="background: var(--gray-100); border: 1px solid var(--gray-300); padding: 20px; border-radius: var(--radius); text-align: center;">
+              <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-700); font-weight: 600; margin-bottom: 8px;">FDR</div>
+              <div style="font-size: 32px; font-weight: 600; color: var(--black);">${fdr}</div>
+            </div>
+            <div style="background: var(--gray-100); border: 1px solid var(--gray-300); padding: 20px; border-radius: var(--radius); text-align: center;">
+              <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-700); font-weight: 600; margin-bottom: 8px;">评分</div>
+              <div style="font-size: 32px; font-weight: 600; color: var(--black);">${score}</div>
+            </div>
+          </div>
+          
+          <!-- Biological Impact -->
+          <div style="background: var(--gray-100); border-left: 2px solid var(--gray-700); padding: 20px; border-radius: var(--radius); margin-bottom: 24px;">
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-900); margin-bottom: 8px;">生物学影响评估</div>
+            <div style="font-size: 14px; line-height: 1.7; color: var(--gray-900);">${biologicalImpact}</div>
+          </div>
+          
+          <!-- Event Description -->
+          <div style="margin-bottom: 24px;">
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-700); margin-bottom: 12px;">事件类型说明</div>
+            <div style="font-size: 14px; line-height: 1.7; color: var(--gray-900); padding: 16px; background: var(--gray-100); border: 1px solid var(--gray-300); border-radius: var(--radius);">${eventDesc}</div>
+          </div>
+          
+          <!-- Statistical Details -->
+          <div style="margin-bottom: 24px;">
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-700); margin-bottom: 12px;">统计详情</div>
+            <table style="width: 100%; font-size: 14px; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid var(--gray-300);">
+                <td style="padding: 12px 16px; font-weight: 600; color: var(--gray-700); width: 40%;">P值</td>
+                <td style="padding: 12px 16px; font-family: var(--font-mono); font-size: 14px; color: var(--gray-900);">${pValue}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--gray-300);">
+                <td style="padding: 12px 16px; font-weight: 600; color: var(--gray-700);">Delta PSI</td>
+                <td style="padding: 12px 16px; font-family: var(--font-mono); font-size: 14px; color: var(--gray-900);">${dpsi}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--gray-300);">
+                <td style="padding: 12px 16px; font-weight: 600; color: var(--gray-700);">FDR校正值</td>
+                <td style="padding: 12px 16px; font-family: var(--font-mono); font-size: 14px; color: var(--gray-900);">${fdr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px 16px; font-weight: 600; color: var(--gray-700);">综合评分</td>
+                <td style="padding: 12px 16px; font-family: var(--font-mono); font-size: 14px; color: var(--gray-900);">${score}</td>
+              </tr>
+            </table>
+          </div>
+          
+          <!-- Literature Evidence -->
+          ${event.evidence_json ? `
+          <div style="margin-bottom: 24px;">
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--gray-700); margin-bottom: 12px;">文献证据</div>
+            <div style="padding: 20px; background: var(--gray-100); border: 1px solid var(--gray-300); border-radius: var(--radius); font-size: 14px; line-height: 1.7; color: var(--gray-900);" id="evidence-content">加载中...</div>
+          </div>
+          ` : '<div style="padding: 20px; background: var(--gray-100); border: 1px solid var(--gray-300); border-radius: var(--radius); font-size: 14px; color: var(--gray-500); text-align: center; margin-bottom: 24px;">暂无文献证据</div>'}
+          
+          <!-- Action Buttons -->
+          <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--border);">
+            <button class="btn btn-secondary" onclick="closeEventModal()">关闭</button>
+            <button class="btn btn-primary" onclick="viewGeneInBrowser('${gene}')">查看基因详情</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  
+  // Load evidence if available
+  if (event.evidence_json) {
+    setTimeout(() => {
+      try {
+        const evidence = typeof event.evidence_json === 'string' ? JSON.parse(event.evidence_json) : event.evidence_json;
+        const evidenceDiv = document.getElementById('evidence-content');
+        if (Array.isArray(evidence)) {
+          evidenceDiv.innerHTML = evidence.map(item => `<div style="margin-bottom: 8px;">• ${item}</div>`).join('');
+        } else if (typeof evidence === 'object') {
+          evidenceDiv.innerHTML = Object.entries(evidence).map(([k, v]) => `<div style="margin-bottom: 8px;"><strong>${k}:</strong> ${v}</div>`).join('');
+        } else {
+          evidenceDiv.textContent = evidence;
+        }
+      } catch (e) {
+        document.getElementById('evidence-content').textContent = event.evidence_json;
+      }
+    }, 100);
+  }
+}
+
+function closeEventModal() {
+  const modal = document.getElementById('event-detail-modal');
+  if (modal) {
+    modal.style.animation = 'fadeOut 0.3s';
+    setTimeout(() => modal.remove(), 300);
+  }
+}
+
+function viewGeneInBrowser(geneSymbol) {
+  closeEventModal();
+  navigateTo('gene');
+  document.getElementById('gene-search').value = geneSymbol;
+  explore基因();
+}
+
+// ==================== AI Assistant Functions ====================
+
+async function loadSkill(skillName) {
+  const skillNames = {
+    'gene_annotation': '基因注释',
+    'literature_search': '文献搜索',
+    'pathway_enrichment': '通路富集',
+    'splice_interpretation': '剪接解读'
+  };
+  
+  const skillDescriptions = {
+    'gene_annotation': '查询基因的详细信息，包括外显子结构、剪接位点、保守性评分和临床变异。',
+    'literature_search': '搜索 PubMed、Europe PMC 等数据库中的科学文献，查找与基因或疾病相关的剪接研究。',
+    'pathway_enrichment': '对候选基因列表进行 GO、KEGG、Reactome 通路富集分析，识别显著的功能类别。',
+    'splice_interpretation': '解读特定剪接事件的生物学和临床意义，包括致病性预测和治疗靶点分析。'
+  };
+  
+  // Add user message to chat
+  addChatMessage('user', `我想使用 ${skillNames[skillName]} 技能`);
+  
+  // Show skill description
+  addChatMessage('assistant', `${skillNames[skillName]}\n\n${skillDescriptions[skillName]}\n\n请提供必要的参数（如基因名称、事件类型等），我将为你执行分析。`);
+  
+  // Store current skill for parameter input
+  window.currentSkill = skillName;
+  
+  // Focus input for parameters
+  document.getElementById('chat-input').focus();
+  document.getElementById('chat-input').placeholder = `请输入 ${skillNames[skillName]} 的参数...`;
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const message = input.value.trim();
+  
+  if (!message) return;
+  
+  // Add user message to chat
+  addChatMessage('user', message);
+  input.value = '';
+  
+  // If we have a current skill, try to execute it with the message as parameters
+  if (window.currentSkill) {
+    await executeSkillWithParams(window.currentSkill, message);
+    window.currentSkill = null;
+    document.getElementById('chat-input').placeholder = '输入问题或选择上方技能...';
+  } else {
+    // General question - provide guidance
+    addChatMessage('assistant', '我理解你的问题。请选择上方的技能按钮开始专业分析，或者告诉我你想分析哪个基因/事件。');
+  }
+}
+
+function addChatMessage(role, content) {
+  const messagesDiv = document.getElementById('chat-messages');
+  const isUser = role === 'user';
+  
+  const msgDiv = document.createElement('div');
+  msgDiv.style.cssText = 'padding: 12px; margin-bottom: 12px; background: ' + (isUser ? '#e0f2fe' : 'white') + '; border-radius: var(--radius); box-shadow: 0 1px 2px rgba(0,0,0,0.05);';
+  
+  const titleDiv = document.createElement('div');
+  titleDiv.style.cssText = 'font-size: 12px; font-weight: 700; color: ' + (isUser ? '#0369a1' : 'var(--accent)') + '; margin-bottom: 4px;';
+  titleDiv.textContent = isUser ? '👤 你' : '🤖 SpliceGAIP';
+  
+  const contentDiv = document.createElement('div');
+  contentDiv.style.cssText = 'font-size: 14px; line-height: 1.6; white-space: pre-wrap;';
+  var newlineRegex = new RegExp('\\n', 'g');
+  contentDiv.innerHTML = content.replace(newlineRegex, '<br>');
+  
+  msgDiv.appendChild(titleDiv);
+  msgDiv.appendChild(contentDiv);
+  messagesDiv.appendChild(msgDiv);
+  
+  // Scroll to bottom
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+async function executeSkillWithParams(skillName, paramText) {
+  try {
+    // Parse parameters from text (simple key=value parsing)
+    const params = parseParameters(paramText);
+    
+    // Build request based on skill
+    let requestBody = { skill_name: skillName, parameters: {} };
+    
+    if (skillName === 'gene_annotation') {
+      requestBody.parameters.gene_symbol = params.gene || params.gene_symbol || extractGeneFromText(paramText);
+      requestBody.parameters.include_splicing = true;
+      requestBody.parameters.include_clinical = true;
+    } else if (skillName === 'literature_search') {
+      requestBody.parameters.query = params.query || paramText;
+      requestBody.parameters.max_results = parseInt(params.max_results) || 10;
+      requestBody.parameters.sources = ['pubmed'];
+    } else if (skillName === 'pathway_enrichment') {
+      // Extract gene list from text
+      const genes = extractGenesFromText(paramText);
+      requestBody.parameters.genes = genes;
+      requestBody.parameters.ontologies = ['GO', 'KEGG'];
+    } else if (skillName === 'splice_interpretation') {
+      requestBody.parameters.gene_symbol = params.gene || extractGeneFromText(paramText);
+      requestBody.parameters.event_type = params.event_type || 'SE';
+    }
+    
+    // Call API
+    addChatMessage('assistant', '正在执行分析，请稍候...');
+    
+    const response = await fetch('/api/skills/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API 错误: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    // Display results
+    displaySkillResults(result);
+    
+    // Add success message to chat
+    if (result.success) {
+      addChatMessage('assistant', '✅ 分析完成！结果已显示在右侧面板中。');
+    } else {
+      addChatMessage('assistant', `❌ 分析失败: ${result.error || '未知错误'}`);
+    }
+    
+  } catch (error) {
+    addChatMessage('assistant', `❌ 执行出错: ${error.message}`);
+  }
+}
+
+function parseParameters(text) {
+  const params = {};
+  const pairs = text.split(/\s+/);
+  
+  for (const pair of pairs) {
+    const [key, ...valueParts] = pair.split('=');
+    if (valueParts.length > 0) {
+      params[key.toLowerCase()] = valueParts.join('=');
+    }
+  }
+  
+  return params;
+}
+
+function extractGeneFromText(text) {
+  // Simple extraction - look for common gene patterns
+  const match = text.match(/([A-Z][A-Z0-9]+[0-9]?)/);
+  return match ? match[1] : text.split(/\s+/)[0];
+}
+
+function extractGenesFromText(text) {
+  // Split by comma, space, or semicolon and filter
+  const candidates = text.split(/[,\s;]+/).filter(s => s.length > 1 && /^[A-Z]/.test(s));
+  return candidates.slice(0, 20); // Limit to 20 genes
+}
+
+function displaySkillResults(result) {
+  const resultsDiv = document.getElementById('skill-results');
+  
+  if (!result.success) {
+    resultsDiv.innerHTML = `
+      <div style="padding: 20px; background: #fee2e2; border-left: 4px solid #dc2626; border-radius: var(--radius);">
+        <div style="font-size: 16px; font-weight: 700; color: #dc2626; margin-bottom: 8px;">❌ 分析失败</div>
+        <div style="font-size: 14px; color: #7f1d1d;">${result.error || '未知错误'}</div>
+      </div>
+    `;
+    return;
+  }
+  
+  const skillName = result.skill_name;
+  const data = result.data;
+  
+  let html = `<div style="padding: 20px; background: var(--gray-100); border-left: 2px solid var(--black); border-radius: var(--radius); margin-bottom: 20px;">
+    <div style="font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 4px;">✅ 分析完成</div>
+    <div style="font-size: 13px; color: var(--text);">${getSkillDisplayName(skillName)}</div>
+  </div>`;
+  
+  if (skillName === 'gene_annotation') {
+    html += renderGeneAnnotationResults(data);
+  } else if (skillName === 'literature_search') {
+    html += renderLiteratureSearchResults(data);
+  } else if (skillName === 'pathway_enrichment') {
+    html += renderPathwayEnrichmentResults(data);
+  } else if (skillName === 'splice_interpretation') {
+    html += renderSpliceInterpretationResults(data);
+  }
+  
+  resultsDiv.innerHTML = html;
+}
+
+function getSkillDisplayName(skillName) {
+  const names = {
+    'gene_annotation': '基因注释分析',
+    'literature_search': '文献搜索结果',
+    'pathway_enrichment': '通路富集分析',
+    'splice_interpretation': '剪接事件解读'
+  };
+  return names[skillName] || skillName;
+}
+
+function renderGeneAnnotationResults(data) {
+  let html = '<div class="card" style="margin-bottom: 16px;">';
+  html += '<div style="font-size: 16px; font-weight: 700; margin-bottom: 16px;">🧬 基因基本信息</div>';
+  
+  if (data.basic_info) {
+    const info = data.basic_info;
+    html += `<div style="font-size: 14px; line-height: 1.8;">
+      <div><strong>基因符号:</strong> ${info.symbol || '-'}</div>
+      <div><strong>基因名称:</strong> ${info.name || '-'}</div>
+      <div><strong>Ensembl ID:</strong> ${info.ensembl_gene || '-'}</div>
+      <div><strong>基因类型:</strong> ${info.gene_type || '-'}</div>
+    </div>`;
+    if (info.summary) {
+      html += `<div style="margin-top: 12px; padding: 12px; background: #f8fafc; border-radius: var(--radius); font-size: 13px;">${info.summary}</div>`;
+    }
+  }
+  
+  if (data.gene_structure) {
+    const struct = data.gene_structure;
+    html += '<div style="margin-top: 20px; font-size: 16px; font-weight: 700;">📐 基因结构</div>';
+    html += `<div style="font-size: 14px; line-height: 1.8; margin-top: 8px;">
+      <div><strong>染色体:</strong> ${struct.chromosome || '-'}</div>
+      <div><strong>位置:</strong> ${struct.start || '-'} - ${struct.end || '-'}</div>
+      <div><strong>链方向:</strong> ${struct.strand === 1 ? '+' : (struct.strand === -1 ? '-' : '-')}</div>
+      <div><strong>生物类型:</strong> ${struct.biotype || '-'}</div>
+    </div>`;
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+function renderLiteratureSearchResults(data) {
+  let html = '<div class="card" style="margin-bottom: 16px;">';
+  html += `<div style="font-size: 16px; font-weight: 700; margin-bottom: 16px;">📚 文献搜索结果</div>`;
+  html += `<div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">共找到 ${data.total_found || 0} 篇相关文献</div>`;
+  
+  if (data.results && Array.isArray(data.results)) {
+    data.results.forEach((paper, idx) => {
+      html += `<div style="padding: 16px; margin-bottom: 12px; background: white; border: 1px solid var(--border); border-radius: var(--radius);">
+        <div style="font-size: 14px; font-weight: 700; margin-bottom: 8px; color: var(--accent);">${idx + 1}. ${paper.title || '无标题'}</div>
+        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">
+          ${paper.authors || ''} | ${paper.journal || ''} | ${paper.year || ''}
+        </div>
+        ${paper.citation_count ? `<div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">被引次数: ${paper.citation_count}</div>` : ''}
+        ${paper.abstract ? `<div style="font-size: 13px; line-height: 1.6; color: var(--text); margin-top: 8px; padding: 12px; background: #f8fafc; border-radius: var(--radius);">${paper.abstract.substring(0, 300)}...</div>` : ''}
+        ${paper.url ? `<a href="${paper.url}" target="_blank" style="display: inline-block; margin-top: 8px; font-size: 13px; color: var(--accent); text-decoration: none;">查看原文 →</a>` : ''}
+      </div>`;
+    });
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+function renderPathwayEnrichmentResults(data) {
+  let html = '<div class="card" style="margin-bottom: 16px;">';
+  html += `<div style="font-size: 16px; font-weight: 700; margin-bottom: 16px;">🔬 通路富集分析结果</div>`;
+  html += `<div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">输入基因数: ${data.total_genes || 0} | 显著条目数: ${data.total_significant || 0}</div>`;
+  
+  if (data.enriched_terms && Array.isArray(data.enriched_terms)) {
+    html += '<div style="overflow-x: auto;">';
+    html += '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+    html += '<thead><tr style="background: #f1f5f9; border-bottom: 2px solid var(--border);">';
+    html += '<th style="padding: 12px; text-align: left; font-weight: 700;">数据库</th>';
+    html += '<th style="padding: 12px; text-align: left; font-weight: 700;">术语/通路</th>';
+    html += '<th style="padding: 12px; text-align: center; font-weight: 700;">基因数</th>';
+    html += '<th style="padding: 12px; text-align: right; font-weight: 700;">FDR</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.enriched_terms.forEach((term, idx) => {
+      const sigColor = term.fdr < 0.05 ? '#059669' : (term.fdr < 0.1 ? '#d97706' : '#dc2626');
+      html += `<tr style="border-bottom: 1px solid var(--border);">
+        <td style="padding: 12px;"><span style="display: inline-block; padding: 4px 8px; background: #e0f2fe; color: #0369a1; border-radius: 4px; font-size: 11px; font-weight: 600;">${term.ontology || '-'}</span></td>
+        <td style="padding: 12px; font-weight: 600;">${term.term_name || '-'}</td>
+        <td style="padding: 12px; text-align: center;">${term.gene_count || 0}</td>
+        <td style="padding: 12px; text-align: right; color: ${sigColor}; font-weight: 700;">${term.fdr ? term.fdr.toExponential(2) : '-'}</td>
+      </tr>`;
+    });
+    
+    html += '</tbody></table></div>';
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+function renderSpliceInterpretationResults(data) {
+  let html = '<div class="card" style="margin-bottom: 16px;">';
+  html += `<div style="font-size: 16px; font-weight: 700; margin-bottom: 16px;">⚕️ 剪接事件解读</div>`;
+  
+  if (data.interpretation) {
+    const interp = data.interpretation;
+    
+    if (interp.summary) {
+      html += `<div style="padding: 16px; background: var(--gray-100); border-left: 2px solid var(--gray-700); border-radius: var(--radius); margin-bottom: 20px;">
+        <div style="font-size: 14px; font-weight: 700; color: #92400e; margin-bottom: 8px;">📋 总结</div>
+        <div style="font-size: 14px; line-height: 1.8; color: #78350f;">${interp.summary}</div>
+      </div>`;
+    }
+    
+    if (interp.protein_impact) {
+      const impact = interp.protein_impact;
+      html += '<div style="margin-bottom: 20px;">';
+      html += '<div style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--accent);">🎯 蛋白功能影响</div>';
+      html += `<div style="font-size: 14px; line-height: 1.8;">${impact.functional_consequence || '-'}</div>`;
+      
+      if (impact.affected_domains && impact.affected_domains.length > 0) {
+        html += '<div style="margin-top: 12px; font-size: 13px; font-weight: 700;">受影响的蛋白结构域:</div>';
+        impact.affected_domains.forEach(domain => {
+          html += `<div style="padding: 8px 12px; margin-top: 6px; background: #f8fafc; border-radius: var(--radius); font-size: 13px;">
+            • ${domain.name || '-'} (位置: ${domain.start || '-'}-${domain.end || '-'})
+          </div>`;
+        });
+      }
+      html += '</div>';
+    }
+    
+    if (interp.therapeutic_opportunities) {
+      const thermo = interp.therapeutic_opportunities;
+      html += '<div style="margin-bottom: 20px;">';
+      html += '<div style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--accent);">💊 治疗机会</div>';
+      
+      if (thermo.targeting_strategies && thermo.targeting_strategies.length > 0) {
+        thermo.targeting_strategies.forEach(strategy => {
+          html += `<div style="padding: 12px; margin-bottom: 8px; background: #ecfdf5; border-left: 3px solid #059669; border-radius: var(--radius);">
+            <div style="font-size: 14px; font-weight: 700; color: #047857; margin-bottom: 4px;">${strategy.strategy || '-'}</div>
+            <div style="font-size: 13px; color: #065f46; margin-bottom: 4px;">机制: ${strategy.mechanism || '-'}</div>
+            ${strategy.example ? `<div style="font-size: 12px; color: #065f46;">示例: ${strategy.example}</div>` : ''}
+          </div>`;
+        });
+      }
+      
+      if (thermo.clinical_trials && thermo.clinical_trials.length > 0) {
+        html += '<div style="margin-top: 12px; font-size: 13px; font-weight: 700;">相关临床试验:</div>';
+        thermo.clinical_trials.forEach(trial => {
+          html += `<div style="padding: 8px 12px; margin-top: 6px; background: #f8fafc; border-radius: var(--radius); font-size: 13px;">
+            • ${trial.title || trial.nct_id || '-'} (${trial.status || '进行中'})
+          </div>`;
+        });
+      }
+      html += '</div>';
+    }
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+document.addEventListener('DOMContentLoaded', () => { loadDashboard(); setInterval(() => { if (state.currentPage === 'pipeline' && state.currentProject) { loadPipeline(); } }, 5000); });
+</script>
+</body>
+</html>"""
+
+
+def render(title: str = "SpliceGAIP") -> HTMLResponse:
+    """Render the modern SpliceGAIP web UI."""
+    return HTMLResponse(content=_HTML.replace("__TITLE__", title))
