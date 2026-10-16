@@ -1,23 +1,19 @@
 # SpliceGAIP Docker Image
-# Multi-stage build for optimized production deployment
+# Based on Alpine for minimal size and reliable package management
 
-# ---- Stage 1: Build dependencies ----
-FROM python:3.11-bookworm AS builder
+FROM python:3.11-alpine AS builder
 
 WORKDIR /build
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+# Install build dependencies (Alpine uses apk, much faster than apt)
+RUN apk add --no-cache gcc g++ musl-dev
 
 # Copy and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# ---- Stage 2: Runtime ----
-FROM python:3.11-bookworm AS runtime
+# ---- Runtime Stage ----
+FROM python:3.11-alpine AS runtime
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -26,11 +22,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SPLICEGAIP_MEMORY_DB=/data/splicegaip.sqlite3 \
     SPLICEGAIP_LITERATURE_DB=/data/literature.sqlite3
 
-# Install runtime system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r splicegaip && useradd -r -g splicegaip -m splicegaip
+# Install runtime dependencies (libgomp for OpenMP support)
+RUN apk add --no-cache libgomp
+
+# Create non-root user
+RUN addgroup -S splicegaip && adduser -S splicegaip -G splicegaip
 
 WORKDIR /app
 
@@ -53,5 +49,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # Switch to non-root user
 USER splicegaip
 
-# Default command: serve API and UI
+# Default command
 CMD ["python", "run.py", "serve", "--api", "--ui", "--port", "8800"]
