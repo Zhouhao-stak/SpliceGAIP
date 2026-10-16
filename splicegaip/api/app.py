@@ -77,6 +77,10 @@ def _with_overrides(settings: Any, thresholds: Any) -> Any:
 
 def create_app() -> FastAPI:
     """Build the SpliceGAIP API application."""
+    # Load .env file so API keys are available in environment variables
+    from splicegaip.llm.envfile import load_env_values
+    load_env_values()
+
     app = FastAPI(title="SpliceGAIP API", version=API_VERSION)
     settings, storage_warnings = load_prepared_settings()
     ensure_runtime_dirs(settings)

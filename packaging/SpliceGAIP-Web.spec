@@ -29,8 +29,8 @@ datas = [
     # YAML configuration read at runtime (config.py resolves it relative to
     # the frozen package root, i.e. <bundle>/config).
     (os.path.join(ROOT, "config"), "config"),
-    # shipped so the launcher can drop a fill-in template next to the exe
-    (os.path.join(ROOT, ".env.example"), "."),
+    # API configuration guide (users copy this to .env and fill in their key)
+    (os.path.join(ROOT, "API_CONFIG.md"), "."),
 ]
 # matplotlib ships fonts/mpl-data; reportlab ships AFM/VFF font metrics.
 datas += collect_data_files("matplotlib")

@@ -1,0 +1,94 @@
+name: SpliceGAIP Release
+
+# 自动发布 SpliceGAIP 的 Windows 便携版。
+# 触发方式：
+#   1. 推送以 v 开头的 tag（如 v1.0.0）→ 自动打包并发布正式 Release
+#   2. 在 Actions 页面手动 Run workflow → 仅构建验证（不发布，用于测试工作流）
+# 构建与上传全部在 GitHub 云端完成，不依赖本地网络。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows executable (onedir)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller (serve_ui.py → SpliceGAIP.exe)
+        run: |
+          pyinstaller packaging\SpliceGAIP-Web.spec --distpath dist --workpath packaging\build-temp --noconfirm
+
+      - name: Verify build output
+        run: |
+          if (!(Test-Path dist\SpliceGAIP\SpliceGAIP.exe)) {
+            Write-Error "SpliceGAIP.exe not found in dist/SpliceGAIP/"
+            exit 1
+          }
+
+      - name: Package portable ZIP
+        run: |
+          $zip = "SpliceGAIP-${{ github.ref_name }}-windows.zip"
+          Compress-Archive -Path "dist\SpliceGAIP\*" -DestinationPath $zip -Force
+          Write-Host "Created $zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: splicegaip-windows
+          path: SpliceGAIP-${{ github.ref_name }}-windows.zip
+          retention-days: 5
+
+  release:
+    name: Publish GitHub Release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    # 仅在推送 v* tag 时发布；手动触发只做构建验证
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: splicegaip-windows
+          path: release-assets
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SpliceGAIP ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*
+          body: |
+            ## SpliceGAIP ${{ github.ref_name }}
+
+            Windows 便携版（免安装）。下载 `SpliceGAIP-${{ github.ref_name }}-windows.zip`，解压后双击 `SpliceGAIP.exe` 即可启动本地服务并自动打开浏览器界面。
+
+            ### 使用前配置
+            - 发布版 **不包含任何 API 密钥**。首次运行前请参考压缩包内的 `API_CONFIG.md`，在解压目录新建 `.env` 并填入你的 LLM API Key（如 `OPENAI_API_KEY=...`）。
+            - 配置目录 `config/` 已随包提供。
+
+            ### 说明
+            - 构建由 GitHub Actions 在云端完成，产物与仓库源码一致。
+            - 当前仅发布 Windows 主版本；如需 macOS / Linux 版，可在本工作流扩展 build matrix。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

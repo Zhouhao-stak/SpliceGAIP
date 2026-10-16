@@ -1,0 +1,52 @@
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+
+# Build artifacts
+build/
+dist/
+packaging/build-temp/
+packaging/dist-*/
+packaging/build-*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data (don't include in image)
+runtime/
+*.sqlite3
+.env
+
+# Documentation (not needed in container)
+docs/
+examples/
+*.md
+!requirements.txt
+
+# Test files
+tests/
+test-venv/
+.pytest_cache/
+.coverage
+
+# PPT and presentation files
+SpliceGAIP项目汇报/
+*.pptx
+create_ppt.py

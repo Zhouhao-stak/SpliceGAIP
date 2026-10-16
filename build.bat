@@ -39,25 +39,38 @@ deactivate
 echo       Done.
 echo.
 
+REM Copy .env file if it exists (for user's API key)
+echo [3/3] Copying configuration files...
+if exist ".env" (
+    copy /Y ".env" "dist\SpliceGAIP\.env" >nul 2>&1
+    echo       Copied .env to dist folder
+)
+if exist "API_CONFIG.md" (
+    copy /Y "API_CONFIG.md" "dist\SpliceGAIP\API_CONFIG.md" >nul 2>&1
+    echo       Copied API_CONFIG.md to dist folder
+)
+echo       Done.
+echo.
+
 REM Verify output
-echo [3/3] Verifying output...
-if exist "dist\SpliceGAIP.exe" (
-    for %%I in ("dist\SpliceGAIP.exe") do set SIZE=%%~zI
+echo [4/4] Verifying output...
+if exist "dist\SpliceGAIP\SpliceGAIP.exe" (
+    for %%I in ("dist\SpliceGAIP\SpliceGAIP.exe") do set SIZE=%%~zI
     set /a SIZE_MB=!SIZE! / 1048576
     echo       SUCCESS!
     echo.
     echo ========================================
     echo   Build Complete!
     echo ========================================
-    echo   Location: dist\SpliceGAIP.exe
-    echo   Size: !SIZE_MB! MB
+    echo   Location: dist\SpliceGAIP\
+    echo   EXE Size: !SIZE_MB! MB
     echo   Date: %date% %time%
     echo ========================================
     echo.
-    echo To run: dist\SpliceGAIP.exe
+    echo To run: cd dist\SpliceGAIP ^&^& SpliceGAIP.exe
     echo.
 ) else (
-    echo ERROR: EXE file not found in dist/
+    echo ERROR: EXE file not found in dist/SpliceGAIP/
     exit /b 1
 )
 

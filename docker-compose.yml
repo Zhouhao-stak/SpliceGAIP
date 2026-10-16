@@ -1,0 +1,54 @@
+# SpliceGAIP Docker Compose Configuration
+# Usage: docker-compose up -d
+
+services:
+  splicegaip:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: splicegaip
+    restart: unless-stopped
+    ports:
+      - "8800:8800"  # API server
+      - "8501:8501"  # Streamlit UI (optional)
+    volumes:
+      # Persist analysis data and databases
+      - splicegaip-data:/data
+      # Mount local config (optional, for custom settings)
+      - ./config:/app/config:ro
+    environment:
+      # DeepSeek API configuration (or use .env file)
+      - MODEL_API_BASE_URL=https://api.deepseek.com
+      - MODEL_NAME=deepseek-flash
+      - MODEL_API_KEY=${MODEL_API_KEY:-}
+      - MODEL_THINKING=auto
+      - MODEL_REASONING_EFFORT=low
+      # Runtime settings
+      - SPLICEGAIP_RUNTIME_ROOT=/data/runtime
+      - SPLICEGAIP_ENABLE_PUBMED=true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8800/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - splicegaip-network
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+volumes:
+  splicegaip-data:
+    driver: local
+    name: splicegaip-data
+
+networks:
+  splicegaip-network:
+    driver: bridge
