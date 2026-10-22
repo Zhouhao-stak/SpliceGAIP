@@ -31,6 +31,10 @@ datas = [
     (os.path.join(ROOT, "config"), "config"),
     # API configuration guide (users copy this to .env and fill in their key)
     (os.path.join(ROOT, "API_CONFIG.md"), "."),
+    (os.path.join(ROOT, "splicegaip", "interface", "opencc-cn2t.js"), "splicegaip/interface"),
+    (os.path.join(ROOT, "splicegaip", "interface", "OPENCC-JS-LICENSE.txt"), "splicegaip/interface"),
+    (os.path.join(ROOT, "splicegaip", "interface", "OPENCC-DATA-LICENSE.txt"), "splicegaip/interface"),
+    (os.path.join(ROOT, "splicegaip", "interface", "OPENCC-NOTICE.txt"), "splicegaip/interface"),
 ]
 # matplotlib ships fonts/mpl-data; reportlab ships AFM/VFF font metrics.
 datas += collect_data_files("matplotlib")

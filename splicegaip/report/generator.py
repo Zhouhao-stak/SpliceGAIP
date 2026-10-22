@@ -179,6 +179,7 @@ class ReportGenerator:
         ai_hypotheses = self._ai_hypotheses_html()
         ai_critique = self._ai_critique_html()
         ai_model = self._ai_model_html()
+        provenance_number = "9" if ai_hypotheses else "8"
         hypothesis_tests = self._hypothesis_html()
         external_findings = self._external_html()
         recurrence_section = self._recurrence_html()
@@ -274,7 +275,7 @@ SpliceGAIP's report agent.</p>
 
 {('<h2>8. AI-generated hypotheses and validation plan</h2>' + ai_hypotheses) if ai_hypotheses else ''}
 {('<h3>8.1 Automated critique of the interpretation</h3>' + ai_critique) if ai_critique else ''}
-<h2>9. AI provenance</h2>
+<h2>{provenance_number}. AI provenance</h2>
 {ai_model}
 <p class="meta">Evidence sources: {html.escape('; '.join(context.knowledge.describe_sources()))}.
 Workflow log entries: {len(context.workflow_log)}. All results are reproducible from the archived input data and parameters.</p>
@@ -554,6 +555,35 @@ Workflow log entries: {len(context.workflow_log)}. All results are reproducible 
         story.append(Paragraph("7. References", heading_style))
         for reference in self._references():
             story.append(Paragraph(f"&bull; {reference}", body_style))
+
+        has_llm_hypotheses = isinstance(block, dict) and block.get("source") == "llm"
+        provenance_number_pdf = "9" if has_llm_hypotheses else "8"
+        story.append(Spacer(1, 4 * mm))
+        story.append(Paragraph(f"{provenance_number_pdf}. AI provenance", heading_style))
+        if not insights.get("enabled"):
+            story.append(
+                Paragraph(
+                    "AI enrichment: not active (no model endpoint configured). "
+                    "All text in this report is deterministic.",
+                    body_style,
+                )
+            )
+        else:
+            status = insights.get("status") if isinstance(insights.get("status"), dict) else {}
+            story.append(
+                Paragraph(
+                    f"AI enrichment: {insights.get('model') or status.get('model') or 'configured model'} "
+                    f"&middot; {status.get('base_url') or ''} "
+                    f"&middot; {int(insights.get('calls') or status.get('call_count') or 0)} model calls.",
+                    body_style,
+                )
+            )
+        story.append(
+            Paragraph(
+                "All results are reproducible from the archived input data and parameters.",
+                body_style,
+            )
+        )
 
         doc = SimpleDocTemplate(str(path), pagesize=A4, title="SpliceGAIP Analysis Report")
         doc.build(story)

@@ -53,3 +53,35 @@
 - `.env` 文件包含敏感信息，**不要**提交到 Git
 - 已添加到 `.gitignore`，不会被版本控制追踪
 - 建议定期轮换 API 密钥
+
+## 运行时安全与日志
+
+API 默认保持本机开发的兼容行为；当服务需要被局域网或反向代理访问时，建议设置 API Key：
+
+```dotenv
+SPLICEGAIP_API_KEY=替换为随机长字符串
+```
+
+设置后，除 `/api/health` 外的 `/api/*` 请求必须携带下面任一种认证头：
+
+```http
+X-API-Key: <your-key>
+```
+
+或：
+
+```http
+Authorization: Bearer <your-key>
+```
+
+未配置 `SPLICEGAIP_API_KEY` 时不会强制认证，适合本机启动和桌面 EXE 场景。当前浏览器 UI 不会自动读取服务器密钥；若需要保护浏览器 UI，请在反向代理层做认证，或保持 API Key 未配置并限制服务只监听本机。不要把密钥提交到 Git；生产环境应通过环境变量或未纳入版本控制的 `.env` 文件注入。
+
+每个请求都会返回 `X-Request-ID`，并写入结构化 JSON 日志。默认日志位置为运行时目录下的 `logs/splicegaip.log`，支持轮转；可通过以下变量覆盖：
+
+```dotenv
+SPLICEGAIP_LOG_LEVEL=INFO
+SPLICEGAIP_LOG_FILE=/path/to/splicegaip.log
+SPLICEGAIP_RATE_LIMIT=120
+```
+
+`SPLICEGAIP_RATE_LIMIT` 是每个客户端 IP 每 60 秒允许的 API 请求数，默认 `0`（关闭）。超过限制返回 `429` 和 `Retry-After`；健康探针不计入限流。日志不会记录 API Key、Authorization 头或完整请求体。

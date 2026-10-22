@@ -52,6 +52,7 @@ ALL_FEATURES: tuple[str, ...] = (
     "limitations",  # additional study-design limitations
     "hypotheses",  # hypotheses + validation suggestions
     "critique",  # self-critique of the narrative
+    "ingest",  # messy input profiling + field mapping
 )
 
 _JSON_FENCE = re.compile(r"```(?:json|JSON)?\s*(.*?)```", re.DOTALL)

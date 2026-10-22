@@ -7,6 +7,18 @@ Provides runtime access to external MCP servers for:
 - Browser automation for data extraction
 """
 
-from splicegaip.mcp.client import MCPClient
+from splicegaip.mcp.client import (
+    MCPClient,
+    MCPToolInfo,
+    get_mcp_client,
+    mcp_call_tool,
+    mcp_list_servers,
+)
 
-__all__ = ["MCPClient"]
+__all__ = [
+    "MCPClient",
+    "MCPToolInfo",
+    "get_mcp_client",
+    "mcp_call_tool",
+    "mcp_list_servers",
+]

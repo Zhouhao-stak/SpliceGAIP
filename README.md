@@ -2,6 +2,11 @@
 
 **AI-driven Alternative Splicing Analysis Agent Platform**
 
+[![Tests](https://github.com/yourname/splicegaip/actions/workflows/test.yml/badge.svg)](https://github.com/yourname/splicegaip/actions)
+[![Coverage](https://img.shields.io/badge/coverage-27%25-yellow)](https://htmlcov/index.html)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 SpliceGAIP 是在开源项目 [BioGAIP](https://github.com/zhangjy859/BioGAIP) 的多智能体架构基础上，
 结合剪接领域数据层（来自 SplicingNexus v2 的生产级事件标准化契约）重构而成的
 **面向可变剪接下游分析的 AI 智能体平台**。
@@ -10,7 +15,7 @@ SpliceGAIP 是在开源项目 [BioGAIP](https://github.com/zhangjy859/BioGAIP) �
 
 ---
 
-## 1. 定位（Phase 1）
+## 4. 定位（Phase 1）
 
 ```
 已完成分析结果（rMATS / SUPPA2 / MAJIQ / LeafCutter / 标准化事件表）
@@ -23,7 +28,44 @@ SpliceGAIP 多智能体系统（BioPlanner → BioAnalyst → BioInterpreter）
 Phase 1 **不处理** FASTQ、比对（STAR/HISAT2）、转录本组装——这些属于 Phase 2。
 输入是「已量化的剪接分析结果」，输出是「可解释、可复现、可发表的剪接分析报告」。
 
-## 2. 从 BioGAIP 继承了什么
+## 2. 部署方式
+
+SpliceGAIP 提供三种部署方案：
+
+### 🚀 Coolify 一键部署到自有服务器（推荐）
+
+**像扣子（Coze）一样简单**：在自己的服务器上享受 SaaS 体验！
+
+```bash
+# 1. 安装 Coolify（服务器上执行）
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash
+
+# 2. 本地推送代码
+git push origin main
+
+# 3. Coolify 自动构建、部署、配置 SSL ✨
+```
+
+**优势**：Web 管理界面 + 自动 HTTPS + Git 自动部署 + 完全免费  
+详细指南：[DEPLOY_COOLIFY.md](DEPLOY_COOLIFY.md)
+
+### 🐳 Docker 容器部署
+
+```bash
+docker compose up -d
+# API: http://localhost:8800
+# UI:  http://localhost:8501
+```
+
+### 💻 Windows EXE 便携版
+
+```bash
+dist/SpliceGAIP.exe  # 双击即用，无需 Python
+```
+
+---
+
+## 6. 从 BioGAIP 继承了什么
 
 | 能力 | 来源 | 现状 |
 |---|---|---|
@@ -34,7 +76,7 @@ Phase 1 **不处理** FASTQ、比对（STAR/HISAT2）、转录本组装——这
 | 长上下文/记忆管理 | BioGAIP memory 体系 | ✅ 重组为 SQLite Analysis Memory |
 | BioWorker 执行器 / micromamba 环境管理 / nf-core 记忆 | BioGAIP | ❌ Phase 1 不需要，移入 `legacy/` |
 
-## 3. 从 SplicingNexus v2 继承了什么
+## 7. 从 SplicingNexus v2 继承了什么
 
 | 资产 | 现状 |
 |---|---|
@@ -44,7 +86,7 @@ Phase 1 **不处理** FASTQ、比对（STAR/HISAT2）、转录本组装——这
 | 置信分级/质量门控思路 | ✅ `splicegaip/splicing/filtering.py` |
 | 图件输出规范（PNG 300dpi + SVG） | ✅ `splicegaip/analysis/visualization.py` |
 
-## 4. 快速开始
+## 8. 快速开始
 
 ```bash
 # 1. 安装（Python >= 3.10）
@@ -90,7 +132,7 @@ python scripts/validate_ui.py
 > 不支持 SQLite 文件锁，程序会自动探测并迁移）。详细操作手册见
 > [`docs/USAGE.md`](docs/USAGE.md)。
 
-## 5. 输入格式（Standard BioAnalysis Format）
+## 9. 输入格式（Standard BioAnalysis Format）
 
 自动识别以下输入（目录形式）：
 
@@ -107,7 +149,7 @@ python scripts/validate_ui.py
 
 `sample_metadata.tsv` 列：`sample_id, group, condition, tissue, batch`。
 
-## 6. Agent 架构
+## 10. Agent 架构
 
 ### 6.1 自治内核（`splicegaip/agent/`，默认启用）
 
@@ -200,7 +242,7 @@ MyGene/PubMed/KEGG/剪接解读此前只能单独调 API，现在是 agent 动�
 Agent 间通过结构化消息协作，全部操作写入 SQLite Analysis Memory
 （输入指纹、分析计划、生成代码、结果、解释、工作流日志），保证科研可重复性。
 
-## 7. 输出
+## 11. 输出
 
 ```
 runtime/projects/<project_id>/
@@ -214,7 +256,7 @@ runtime/projects/<project_id>/
 报告结构：Summary / Methods / Results（3.3 统计假设检验）/ Figures /
 Biological Interpretation（5.5 外部知识发现）/ Limitations / References。
 
-## 8. 项目结构
+## 12. 项目结构
 
 ```
 SpliceGAIP/
@@ -238,38 +280,60 @@ SpliceGAIP/
 └── legacy/            # BioGAIP 原始代码（归档保留）
 ```
 
-## 9. 测试
+## 13. 测试
+
+### 运行测试
 
 ```bash
-python -m pytest tests/ -v
+# 安装测试依赖
+pip install -r requirements-dev.txt
+
+# 运行全部测试（单元 + API 集成）
+pytest tests/unit tests/integration -v
+
+# 运行测试并生成覆盖率报告
+pytest --cov=splicegaip --cov-report=html
+
+# 查看 HTML 覆盖率报告
+open htmlcov/index.html  # macOS/Linux
+start htmlcov\index.html  # Windows
 ```
 
-144 个测试（含自治内核 + Phase 2 + 续跑），覆盖：
-- rMATS/SUPPA2/MAJIQ/LeafCutter/标准表五种输入解析与格式自动识别；
-- 统计（卡方检验、BH 校正，与 scipy 交叉验证）、过滤、候选排序；
-- GO/KEGG 超几何富集、数据加载与校验；
-- 端到端多智能体流程（rMATS 演示数据 + 无注释标准表两种场景，
-  含图表文件、报告章节、候选排序、记忆落库断言）；
-- FastAPI 全接口（upload/analyze/status/report/figure/llm 配置/错误路径，TestClient）；
-- 厂商适配层（DeepSeek thinking 模式开关、.env 读写与脱敏、端点 + API 双层验证）。
-- Streamlit UI 无头全流程（`scripts/validate_ui.py`，AppTest 驱动：上传演示
-  文件 → 点击分析 → 校验摘要/候选表/图件/下载按钮 → Projects/Results 两页
-  渲染 → 未知项目 id 的告警路径）；
-- 自治智能体（`tests/test_agent_loop.py`，15 项）：数据画像与质量标记、
-  阈值自适应（可挽救数据放宽、无解数据停止并接受局限）、决策链（先画像、
-  空结果触发反思、改完参数重跑过滤）、端到端两种病态数据集、步数预算硬上限、
-  跨运行经验记忆读写、scripted 模式行为不变；
-- 自我质疑与外部知识（`tests/test_agent_phase2.py`，22 项）：五类假设检验
-  （含 BH 校正单调性、偏移/失衡/混杂/复发各自的拒绝与接受、小样本一律判
-  inconclusive）、技能桥接（开关/预算/缓存/失败降级）、人在回路（auto 自动
-  批准、assisted 拒绝后动作被跳过、拒绝接受局限则问题保持开放）、GSEApy/
-  MyGene 适配器的退化路径与字段归一化、报告 3.3 与 5.5 两节渲染、
-  端到端断言 agent 真的跑了检验且未联网。
-- 多轮追问/续跑（`tests/test_agent_session.py`，8 项）：状态快照 save/load 往返、
-  `parse_followup` 基因与事件类型识别、`build_followup_actions` 动作前缀构建、
-  端到端断言续跑**继承**历史决策并只新增 followup 两步、主循环不重跑整条流水线。
+### 当前测试状态
 
-## 10. 设计原则
+✅ **83 个测试全部通过**（65 个单元测试 + 18 个 API 集成测试）：
+
+| 模块 | 测试数 | 覆盖率 | 状态 |
+|------|--------|--------|------|
+| Schema (数据模型) | 15 | 60% | ✅ |
+| Statistics (统计检验) | 12 | 75% | ✅ |
+| Config (配置管理) | 14 | 75% | ✅ |
+| Data layer (加载/验证/过滤) | 6 | 75–98% | ✅ |
+| Parsers (解析器) | 7 | 81% | ✅ |
+| Agent core (状态/画像/反思) | 6 | 72–94% | ✅ |
+| LLM fallback (离线客户端) | 3 | 83% | ✅ |
+| Observability (日志) | 2 | 94% | ✅ |
+| FastAPI (API 集成) | 18 | 40% | ✅ |
+
+📊 **总体覆盖率**: 27%（核心分析模块、数据边界、Agent 决策边界、离线 fallback、基础 API 路径和安全边界已覆盖）
+
+🎯 **当前 CI 门槛**: 20%；下一阶段补充数据处理、Agent 和 UI 测试后再逐步提高
+
+详细测试文档请参阅 [TESTING.md](TESTING.md)。
+
+### CI/CD
+
+每次代码推送都会自动运行：
+- ✅ 单元测试（Python 3.10/3.11/3.12）
+- ✅ 代码风格检查（Black, Flake8）
+- ✅ 类型检查（MyPy）
+- ✅ 覆盖率阈值验证（当前最低 20%，随覆盖率提升逐步收紧）
+
+详见 [.github/workflows/test.yml](.github/workflows/test.yml)。
+
+---
+
+## 14. 设计原则
 
 1. 保留 BioGAIP 成熟框架，不重建基础设施；
 2. 增加剪接领域专用智能层（标准化、排序、证据）；
@@ -278,13 +342,13 @@ python -m pytest tests/ -v
 5. 全程可复现：workflow、参数、软件版本、日志全部留痕；
 6. 所有结论必须有证据支撑，区分「已证实统计结果」与「待验证假设」。
 
-## 11. 路线图
+## 15. 路线图
 
 - **Phase 2**：FASTQ 处理、比对 pipeline（rMATS/SUPPA2 在线运行）
 - **Phase 3**：单细胞 RNA-seq、多组学
 - **Phase 4**：AI autonomous bioinformatics researcher
 
-## 12. 致谢与许可
+## 16. 致谢与许可
 
 - BioGAIP：AGPL-3.0（`legacy/` 中保留原始代码与 LICENSE）
 - SplicingNexus v2 事件契约与统计实现移植自用户自有项目

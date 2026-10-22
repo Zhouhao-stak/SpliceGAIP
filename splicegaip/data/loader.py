@@ -30,6 +30,7 @@ from splicegaip.splicing.parsers.leafcutter import is_leafcutter_file, parse_lea
 from splicegaip.splicing.parsers.majiq import is_majiq_file, parse_majiq_file
 from splicegaip.splicing.parsers.suppa import is_suppa_directory, parse_suppa_psi_file
 from splicegaip.splicing.schema import (
+    CORE_EVENT_FIELDS,
     StandardEvent,
     SampleMetadata,
     group_sample_ids,
@@ -41,8 +42,16 @@ from splicegaip.splicing.schema import (
 STANDARD_EVENT_FILENAMES = (
     "AS_event_master.tsv",
     "as_event_master.tsv",
+    "AS_event_master.csv",
+    "as_event_master.csv",
+    "AS_event_master_all.tsv",
+    "as_event_master_all.tsv",
+    "AS_event_master_all.csv",
+    "as_event_master_all.csv",
     "events.tsv",
+    "events.csv",
     "as_events.tsv",
+    "as_events.csv",
 )
 METADATA_FILENAMES = (
     "sample_metadata.tsv",
@@ -124,14 +133,54 @@ def _find_file(directory: Path, candidates: Iterable[str]) -> Path | None:
         path = directory / name
         if path.is_file():
             return path
+    # Vendor exports often prefix the same names with a step number, e.g.
+    # ``01_sample_metadata.csv`` or ``10_AS_event_master_all.csv``.
+    lowered = [name.lower() for name in candidates]
+    for path in sorted(directory.iterdir()):
+        if not path.is_file():
+            continue
+        filename = path.name.lower()
+        for name in lowered:
+            if not filename.endswith(name):
+                continue
+            prefix = filename[: len(filename) - len(name)].rstrip("_")
+            if prefix == "" or prefix.isdigit():
+                return path
+    return None
+
+
+def _has_standard_event_header(path: Path) -> bool:
+    """True if the first row contains the full AS_event_master contract."""
+    if path.suffix.lower() not in {".tsv", ".txt", ".csv"}:
+        return False
+    delimiter = "\t" if path.suffix.lower() in {".tsv", ".txt"} else ","
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            header = next(csv.reader(handle, delimiter=delimiter), None)
+    except (OSError, csv.Error):
+        return False
+    if not header:
+        return False
+    columns = {column.strip() for column in header}
+    return set(CORE_EVENT_FIELDS).issubset(columns)
+
+
+def _find_standard_event_table(directory: Path) -> Path | None:
+    path = _find_file(directory, STANDARD_EVENT_FILENAMES)
+    if path:
+        return path
+    for candidate in sorted(directory.iterdir()):
+        if candidate.is_file() and _has_standard_event_header(candidate):
+            return candidate
     return None
 
 
 def load_differential_expression(path: Path) -> list[DifferentialGene]:
     """Load a differential-expression table (gene_id/log2FC/pvalue/padj/baseMean)."""
     genes: list[DifferentialGene] = []
+    delimiter = "," if path.suffix.lower() == ".csv" else "\t"
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        for raw in csv.DictReader(handle, delimiter="\t"):
+        for raw in csv.DictReader(handle, delimiter=delimiter):
             gene_id = str(raw.get("gene_id", "")).strip()
             if not gene_id:
                 continue
@@ -200,7 +249,7 @@ def load_dataset(input_path: str | Path) -> Dataset:
                     )
                 )
         else:
-            standard_path = _find_file(directory, STANDARD_EVENT_FILENAMES)
+            standard_path = _find_standard_event_table(directory)
             if standard_path:
                 source_format = "standard"
                 events = load_events_tsv(standard_path)

@@ -25,6 +25,10 @@ datas = [
     (os.path.join(ROOT, "config"), "config"),
     # shipped so the launcher can drop a fill-in template next to the exe
     (os.path.join(ROOT, ".env.example"), "."),
+    (os.path.join(ROOT, "splicegaip", "interface", "opencc-cn2t.js"), "splicegaip/interface"),
+    (os.path.join(ROOT, "splicegaip", "interface", "OPENCC-JS-LICENSE.txt"), "splicegaip/interface"),
+    (os.path.join(ROOT, "splicegaip", "interface", "OPENCC-DATA-LICENSE.txt"), "splicegaip/interface"),
+    (os.path.join(ROOT, "splicegaip", "interface", "OPENCC-NOTICE.txt"), "splicegaip/interface"),
 ]
 datas += collect_data_files("matplotlib")
 datas += collect_data_files("reportlab")
@@ -65,6 +69,10 @@ hiddenimports += [
     "multipart",
     "email",
     "mimetypes",
+    # Hypothesis tests import scipy.stats lazily inside functions; the
+    # statistics capability must be available in the frozen build.
+    "scipy",
+    "scipy.stats",
 ]
 
 # Explicitly add report submodules since collect_submodules may miss them
@@ -77,7 +85,6 @@ excludes = [
     "streamlit",
     "pytest",
     "pandas",
-    "scipy",
     "seaborn",
     "plotly",
     "sqlalchemy",

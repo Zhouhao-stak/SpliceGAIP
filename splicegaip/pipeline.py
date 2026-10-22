@@ -435,11 +435,32 @@ def project_status(project_id: str, settings: Settings | None = None) -> dict[st
     project = memory.get_project(project_id)
     if project is None:
         return None
+    events = memory.load_events(project_id)
+    candidates = memory.load_candidates(project_id)
+    gates = settings.analysis
+
+    def _is_significant(event: Any) -> bool:
+        if isinstance(event, dict):
+            if event.get("significant") is not None:
+                return bool(event["significant"])
+            fdr, delta = event.get("fdr"), event.get("delta_psi")
+        else:
+            fdr, delta = event.fdr, event.delta_psi
+        return (
+            fdr is not None
+            and delta is not None
+            and fdr < gates.fdr_threshold
+            and abs(delta) > gates.delta_psi_threshold
+        )
+
+    significant = sum(1 for event in events if _is_significant(event))
     return {
         "project": project,
         "samples": memory.load_samples(project_id) if hasattr(memory, "load_samples") else [],
-        "events": len(memory.load_events(project_id)),
-        "candidates": memory.load_candidates(project_id)[:10],
+        "events": len(events),
+        "significant": significant,
+        "candidates": candidates[:10],
+        "candidates_total": len(candidates),
         "enrichment": memory.load_enrichment(project_id)[:10],
         "artifacts": memory.load_artifacts(project_id),
         "plan": memory.load_plan(project_id),

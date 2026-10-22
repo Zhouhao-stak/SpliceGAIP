@@ -1,0 +1,19 @@
+# Test configuration file
+llm:
+  enabled: false
+  provider: test
+  api_key: test-key
+  model: test-model
+
+analysis:
+  fdr_threshold: 0.05
+  delta_psi_threshold: 0.1
+  min_support_reads: 10
+  top_candidates: 20
+
+agent:
+  mode: scripted
+  max_steps: 5
+  max_seconds: 60
+  adaptive_thresholds: true
+  reflection: false

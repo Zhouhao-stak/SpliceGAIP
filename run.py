@@ -182,23 +182,45 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    if args.api:
+    import threading
+    
+    def start_api():
         import uvicorn
-
         from splicegaip.api.app import create_app
-
         uvicorn.run(create_app(), host=args.host, port=args.port)
-        return 0
-    if args.ui:
+    
+    def start_ui():
         import subprocess
-
         ui_path = Path(__file__).resolve().parent / "splicegaip" / "interface" / "streamlit_app.py"
         subprocess.run(
-            [sys.executable, "-m", "streamlit", "run", str(ui_path), "--server.port", str(args.port)]
+            [sys.executable, "-m", "streamlit", "run", str(ui_path), "--server.port", "8501", "--server.address", "0.0.0.0"]
         )
-        return 0
-    print("Nothing to serve: pass --api or --ui.")
-    return 1
+    
+    threads = []
+    if args.api:
+        api_thread = threading.Thread(target=start_api, daemon=True)
+        api_thread.start()
+        threads.append(api_thread)
+        print(f"API server starting on http://{args.host}:{args.port}")
+    
+    if args.ui:
+        ui_thread = threading.Thread(target=start_ui, daemon=True)
+        ui_thread.start()
+        threads.append(ui_thread)
+        print("Streamlit UI starting on http://0.0.0.0:8501")
+    
+    if not threads:
+        print("Nothing to serve: pass --api or --ui.")
+        return 1
+    
+    # Keep main thread alive
+    try:
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -259,7 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", help="Serve the API or the dashboard")
     serve.add_argument("--api", action="store_true", help="Serve the FastAPI application")
     serve.add_argument("--ui", action="store_true", help="Serve the Streamlit dashboard")
-    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--host", default="0.0.0.0")
     serve.add_argument("--port", type=int, default=8800)
     serve.set_defaults(func=_cmd_serve)
     return parser

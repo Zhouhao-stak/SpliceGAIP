@@ -6,11 +6,13 @@ FROM python:3.11-alpine AS builder
 WORKDIR /build
 
 # Install build dependencies (Alpine uses apk, much faster than apt)
-RUN apk add --no-cache gcc g++ musl-dev
+# Added rust compiler for gseapy which requires it for building from source
+RUN apk add --no-cache gcc g++ musl-dev rust cargo
 
 # Copy and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --index-url https://pypi.tuna.tsinghua.edu.cn/simple --prefix=/install -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --index-url https://pypi.tuna.tsinghua.edu.cn/simple --prefix=/install -r requirements.txt
 
 # ---- Runtime Stage ----
 FROM python:3.11-alpine AS runtime

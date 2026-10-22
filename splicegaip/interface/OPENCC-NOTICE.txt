@@ -1,0 +1,8 @@
+opencc-js 1.4.2 (https://github.com/nk2028/opencc-js)
+Bundled file: opencc-cn2t.js (from dist/umd/cn2t.js)
+Copyright (c) 2020-2021 The nk2028 Project
+License: MIT (OPENCC-JS-LICENSE.txt)
+
+The conversion dictionaries are derived from opencc-data
+(https://github.com/nk2028/opencc-data).
+License: Apache-2.0 (OPENCC-DATA-LICENSE.txt)

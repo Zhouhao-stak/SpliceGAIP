@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import re
+import secrets
 import shutil
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -15,8 +22,15 @@ from splicegaip.analysis import extra_figures
 from splicegaip.config import ensure_runtime_dirs, load_prepared_settings
 from splicegaip.interface.web_ui import render as render_web_ui
 from splicegaip.pipeline import list_projects, project_status, run_analysis
+from splicegaip.observability import (
+    configure_logging,
+    new_request_id,
+    reset_request_id,
+    set_request_id,
+)
 
 API_VERSION = "0.1.0"
+logger = logging.getLogger(__name__)
 
 # Dark-navy plate with the BMW-blue accent bar — same marks as the UI header.
 # Served as a real endpoint because browsers probe /favicon.ico unconditionally
@@ -85,10 +99,40 @@ def create_app() -> FastAPI:
     settings, storage_warnings = load_prepared_settings()
     ensure_runtime_dirs(settings)
 
+    # The built-in MCP tool server runs in-process so the AI assistant always
+    # has a live tool provider, including in the packaged one-file build.
+    try:
+        from splicegaip.mcp.demo_server import ensure_demo_server
+
+        demo_status = ensure_demo_server()
+        if demo_status.get("running"):
+            logger.info("Built-in MCP server listening on %s", demo_status.get("url"))
+        else:
+            logger.warning("Built-in MCP server unavailable: %s", demo_status.get("error"))
+    except Exception as error:  # noqa: BLE001 - MCP must never block boot
+        logger.warning("Built-in MCP server failed to start: %s", error)
+    log_path = os.getenv("SPLICEGAIP_LOG_FILE") or (
+        settings.paths.runtime_root / "logs" / "splicegaip.log"
+    )
+    configure_logging(log_path)
+    configured_api_key = os.getenv("SPLICEGAIP_API_KEY", "").strip()
+    try:
+        configured_rate_limit = max(0, int(os.getenv("SPLICEGAIP_RATE_LIMIT", "0")))
+    except ValueError:
+        configured_rate_limit = 0
+    rate_state: dict[str, tuple[float, int]] = {}
+    rate_lock = threading.Lock()
+
     @app.get("/")
     def index() -> Any:
         """Serve the browser UI (what the desktop exe opens automatically)."""
         return render_web_ui(f"SpliceGAIP v{API_VERSION}")
+
+    @app.get("/assets/opencc-cn2t.js", include_in_schema=False)
+    def traditional_chinese_converter() -> FileResponse:
+        """Serve the bundled, offline Chinese script converter."""
+        converter = Path(__file__).resolve().parent.parent / "interface" / "opencc-cn2t.js"
+        return FileResponse(converter, media_type="application/javascript")
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon() -> Response:
@@ -97,6 +141,78 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {"status": "ok", "version": API_VERSION, "llm_configured": settings.llm.configured}
+
+    @app.middleware("http")
+    async def request_boundary(request: Request, call_next: Any) -> Response:
+        """Apply request correlation, baseline headers, and optional API auth."""
+        request_id = new_request_id(request.headers.get("X-Request-ID"))
+        token = set_request_id(request_id)
+        started = time.perf_counter()
+        response: Response
+        try:
+            protected = request.url.path.startswith("/api/") and request.url.path != (
+                "/api/health"
+            )
+            rate_limited = False
+            if configured_rate_limit and protected:
+                client_id = request.client.host if request.client else "unknown"
+                now = time.monotonic()
+                with rate_lock:
+                    window_start, count = rate_state.get(client_id, (now, 0))
+                    if now - window_start >= 60:
+                        window_start, count = now, 0
+                    if count >= configured_rate_limit:
+                        rate_limited = True
+                        retry_after = max(1, int(60 - (now - window_start)) + 1)
+                    else:
+                        rate_state[client_id] = (window_start, count + 1)
+            if rate_limited:
+                response = JSONResponse(
+                    status_code=429,
+                    content={"detail": "rate limit exceeded"},
+                    headers={"Retry-After": str(retry_after)},
+                )
+            elif configured_api_key and protected:
+                supplied = request.headers.get("X-API-Key", "")
+                authorization = request.headers.get("Authorization", "")
+                if not supplied and authorization.lower().startswith("bearer "):
+                    supplied = authorization[7:].strip()
+                if not secrets.compare_digest(supplied, configured_api_key):
+                    response = JSONResponse(
+                        status_code=401,
+                        content={"detail": "API authentication required"},
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+                else:
+                    response = await call_next(request)
+            else:
+                response = await call_next(request)
+        except Exception:
+            logger.exception("request_failed", extra={"event": "request_failed"})
+            raise
+        finally:
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            # The response is intentionally logged only after call_next returns;
+            # rejected requests are still observable without logging credentials.
+            if "response" in locals():
+                logger.info(
+                    "request_completed",
+                    extra={
+                        "event": "request_completed",
+                        "method": request.method,
+                        "path": request.url.path,
+                        "status_code": response.status_code,
+                        "duration_ms": duration_ms,
+                    },
+                )
+            reset_request_id(token)
+
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "same-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        return response
 
     def _fresh_settings() -> Any:
         """Reload settings so a key saved through /api/llm/config is live.
@@ -223,6 +339,70 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=422, detail=str(error)) from error
         return JSONResponse(outcome.summary())
 
+    def _ingest_input_dir(raw: str) -> Path:
+        """Resolve an ingestion directory and keep model exposure local.
+
+        The UI always uploads into the runtime directory; this guard stops a
+        remote caller (when the API is exposed) from pointing the model-backed
+        profiler at arbitrary files elsewhere on the machine.
+        """
+        value = str(raw or "").strip()
+        if not value:
+            raise HTTPException(status_code=400, detail="input_dir is required")
+        path = Path(value).expanduser().resolve()
+        if not path.is_dir():
+            raise HTTPException(status_code=400, detail=f"input_dir does not exist: {path}")
+        if os.getenv("SPLICEGAIP_INGEST_ALLOW_EXTERNAL", "").strip().lower() in {"1", "true", "yes"}:
+            return path
+        roots = [settings.paths.runtime_root.resolve(), Path.cwd().resolve()]
+        if not any(path == root or root in path.parents for root in roots):
+            raise HTTPException(
+                status_code=400,
+                detail="input_dir must be inside the runtime or working directory for ingestion",
+            )
+        return path
+
+    @app.post("/api/ingest/preview")
+    def ingest_preview(payload: dict[str, Any]) -> dict[str, Any]:
+        """Profile messy input and propose a reviewed mapping (no files written)."""
+        from splicegaip.data.ingestion import preview_ingestion
+
+        directory = _ingest_input_dir(str(payload.get("input_dir", "")))
+        try:
+            return preview_ingestion(
+                directory,
+                settings=_fresh_settings(),
+                use_llm=bool(payload.get("use_llm", True)),
+            )
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except Exception as error:  # noqa: BLE001 - surface a useful 500
+            logger.exception("Ingestion preview failed")
+            raise HTTPException(status_code=500, detail=f"Ingestion preview failed: {error}") from error
+
+    @app.post("/api/ingest/apply")
+    def ingest_apply(payload: dict[str, Any]) -> dict[str, Any]:
+        """Convert files with a confirmed mapping into a standardized directory."""
+        from splicegaip.data.ingestion import apply_ingestion
+
+        directory = _ingest_input_dir(str(payload.get("input_dir", "")))
+        mapping = payload.get("mapping")
+        if not isinstance(mapping, dict) or not mapping:
+            raise HTTPException(status_code=400, detail="mapping is required")
+        try:
+            return apply_ingestion(directory, mapping)
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except OSError as error:
+            raise HTTPException(status_code=500, detail=f"Cannot write standardized data: {error}") from error
+        except Exception as error:  # noqa: BLE001 - surface a useful 500
+            logger.exception("Ingestion apply failed")
+            raise HTTPException(status_code=500, detail=f"Ingestion apply failed: {error}") from error
+
     @app.post("/api/upload")
     async def upload(files: list[UploadFile] = File(...)) -> dict[str, Any]:
         """Upload analysis input files into a new staging directory."""
@@ -274,9 +454,14 @@ def create_app() -> FastAPI:
         import logging
         logger = logging.getLogger(__name__)
         
-        logger.info(f"Request method: {request.method}")
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Request content-type: {request.headers.get('content-type')}")
+        logger.info(
+            "upload_debug_request",
+            extra={
+                "event": "upload_debug_request",
+                "method": request.method,
+                "content_type": request.headers.get("content-type", ""),
+            },
+        )
         
         try:
             form = await request.form()
@@ -301,59 +486,329 @@ def create_app() -> FastAPI:
     # ==================== MCP Integration Endpoints ====================
 
     @app.get("/api/mcp/servers")
-    async def mcp_list_servers() -> dict[str, Any]:
-        """List all configured MCP servers and their available tools."""
+    async def mcp_servers(refresh: bool = False) -> dict[str, Any]:
+        """List configured MCP servers, connection state and tool schemas."""
         from splicegaip.mcp import get_mcp_client
 
         client = get_mcp_client()
-        result = {}
+        result: dict[str, Any] = {}
 
-        for server_name in client.servers:
-            connected = await client.connect(server_name)
-            if connected:
-                tools = await client.list_tools(server_name)
+        for server_name, config in client.servers.items():
+            if not config.enabled:
                 result[server_name] = {
-                    "status": "connected",
-                    "tools": [
-                        {
-                            "name": tool.name,
-                            "description": tool.description,
-                        }
-                        for tool in tools
-                    ],
+                    "status": "disabled",
+                    "transport": config.transport,
+                    "builtin": config.builtin,
+                    "tools": [],
                 }
-            else:
-                result[server_name] = {"status": "disconnected"}
+                continue
+            try:
+                connected = (
+                    await client.refresh(server_name)
+                    if refresh
+                    else await client.connect(server_name)
+                )
+                if connected:
+                    tools = await client.list_tools(server_name)
+                    result[server_name] = {
+                        "status": "connected",
+                        "transport": config.transport,
+                        "via": client._connected_via.get(server_name),
+                        "builtin": config.builtin,
+                        "url": config.url,
+                        "tools": [
+                            {
+                                "name": tool.name,
+                                "description": tool.description,
+                                "input_schema": tool.input_schema or {},
+                            }
+                            for tool in tools
+                        ],
+                    }
+                else:
+                    result[server_name] = {
+                        "status": "disconnected",
+                        "transport": config.transport,
+                        "builtin": config.builtin,
+                        "url": config.url,
+                        "tools": [],
+                    }
+            except Exception as error:  # noqa: BLE001 - one bad server must not hide others
+                result[server_name] = {
+                    "status": "error",
+                    "transport": config.transport,
+                    "builtin": config.builtin,
+                    "url": config.url,
+                    "error": str(error),
+                    "tools": [],
+                }
 
-        return {"servers": result}
+        return {
+            "servers": result,
+            "config_path": str(client.config_path),
+            "builtin_server": "splicegaip-builtin",
+        }
 
     @app.post("/api/mcp/call")
     async def mcp_call_tool(payload: dict[str, Any]) -> dict[str, Any]:
-        """Call an MCP tool.
-
-        Expected payload:
-        {
-            "server_name": "browser-use",
-            "tool_name": "navigate_page",
-            "arguments": {"url": "https://example.com"}
-        }
-        """
+        """Call an MCP tool on a connected server."""
         from splicegaip.mcp import get_mcp_client
 
-        server_name = payload.get("server_name")
-        tool_name = payload.get("tool_name")
+        server_name = str(payload.get("server_name", "")).strip()
+        tool_name = str(payload.get("tool_name", "")).strip()
         arguments = payload.get("arguments", {})
 
         if not server_name or not tool_name:
             raise HTTPException(status_code=400, detail="server_name and tool_name are required")
+        if arguments in (None, ""):
+            arguments = {}
+        if not isinstance(arguments, dict):
+            raise HTTPException(status_code=400, detail="arguments must be a JSON object")
 
         client = get_mcp_client()
+        if server_name not in client.servers:
+            raise HTTPException(status_code=404, detail=f"unknown MCP server: {server_name}")
         result = await client.call_tool(server_name, tool_name, arguments)
 
         if "error" in result:
-            return {"success": False, "error": result["error"]}
+            return {"success": False, "error": result["error"], "raw": result.get("result")}
 
-        return {"success": True, "result": result}
+        return {"success": True, "result": result, "server": server_name, "tool": tool_name}
+
+    @app.post("/api/mcp/agent")
+    async def mcp_agent(payload: dict[str, Any]) -> dict[str, Any]:
+        """Let the model pick one MCP tool for a natural-language request.
+
+        The model only proposes ``{server, tool, arguments}``; validation and
+        execution stay local. Without a model endpoint a deterministic router
+        mirrors the same contract, so the demo never dead-ends.
+        """
+        import asyncio
+
+        question = str(payload.get("question", "")).strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="question is required")
+        project_hint = str(payload.get("project_id", "")).strip()
+
+        from splicegaip.mcp import get_mcp_client
+
+        client = get_mcp_client()
+        catalog: list[dict[str, Any]] = []
+        for server_name, config in client.servers.items():
+            if not config.enabled or not await client.connect(server_name):
+                continue
+            for tool in await client.list_tools(server_name):
+                catalog.append(
+                    {
+                        "server": server_name,
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema or {},
+                    }
+                )
+        if not catalog:
+            raise HTTPException(status_code=503, detail="no MCP tools are available")
+
+        project_ids = [
+            str(item.get("project_id"))
+            for item in list_projects(settings)[:10]
+            if item.get("project_id")
+        ]
+        if project_hint not in project_ids:
+            project_hint = ""
+
+        def sanitise(candidate: Any) -> dict[str, Any] | None:
+            if not isinstance(candidate, dict):
+                return None
+            server = str(candidate.get("server", "")).strip()
+            tool_name = str(candidate.get("tool", "")).strip()
+            arguments = candidate.get("arguments") or {}
+            if not tool_name or not isinstance(arguments, dict):
+                return None
+            entry = next(
+                (
+                    item
+                    for item in catalog
+                    if item["server"] == server and item["name"] == tool_name
+                ),
+                None,
+            )
+            if entry is None:
+                matches = [item for item in catalog if item["name"] == tool_name]
+                if len(matches) != 1:
+                    return None
+                entry = matches[0]
+                server = entry["server"]
+            schema = entry.get("input_schema") or {}
+            allowed = set((schema.get("properties") or {}).keys())
+            arguments = {key: value for key, value in arguments.items() if key in allowed}
+            if "project_id" in allowed:
+                supplied = str(arguments.get("project_id", "")).strip()
+                if supplied not in project_ids:
+                    arguments["project_id"] = project_hint or (
+                        project_ids[0] if project_ids else ""
+                    )
+                if not arguments["project_id"]:
+                    arguments.pop("project_id", None)
+            missing = set(schema.get("required") or []) - set(arguments)
+            if missing:
+                return None
+            return {
+                "server": server,
+                "tool": tool_name,
+                "arguments": arguments,
+                "reason": str(candidate.get("reason", "")).strip()[:300],
+            }
+
+        def rule_plan() -> dict[str, Any]:
+            def entry_for(name: str) -> dict[str, Any] | None:
+                return next((item for item in catalog if item["name"] == name), None)
+
+            project_id = project_hint or (project_ids[0] if project_ids else "")
+            type_match = re.search(
+                r"(?<![A-Za-z0-9])(SE|MXE|A5SS|A3SS|RI)(?![A-Za-z0-9])",
+                question.upper(),
+            )
+            if type_match and entry_for("explain_event_type"):
+                return {
+                    "server": entry_for("explain_event_type")["server"],
+                    "tool": "explain_event_type",
+                    "arguments": {"event_type": type_match.group(1)},
+                    "reason": "识别到剪接事件类型关键词",
+                }
+            numbers = re.findall(
+                r"(?<![\w.])(0(?:\.\d+)?|1(?:\.0+)?)(?![\w.])", question
+            )
+            if len(numbers) >= 2 and entry_for("compute_delta_psi"):
+                return {
+                    "server": entry_for("compute_delta_psi")["server"],
+                    "tool": "compute_delta_psi",
+                    "arguments": {
+                        "group1_psi": float(numbers[0]),
+                        "group2_psi": float(numbers[1]),
+                    },
+                    "reason": "识别到两个 PSI 数值，计算 ΔPSI",
+                }
+            gene_match = re.search(
+                r"(?<![A-Za-z0-9])([A-Z][A-Z0-9]{1,9})(?![A-Za-z0-9])", question
+            )
+            excluded = {
+                "PSI", "FDR", "MCP", "RNA", "DNA", "CDNA", "PCR", "AI",
+                "SE", "MXE", "RI", "A5SS", "A3SS",
+            }
+            if (
+                gene_match
+                and gene_match.group(1) not in excluded
+                and entry_for("search_events")
+                and project_id
+            ):
+                return {
+                    "server": entry_for("search_events")["server"],
+                    "tool": "search_events",
+                    "arguments": {
+                        "project_id": project_id,
+                        "gene": gene_match.group(1),
+                        "limit": 10,
+                    },
+                    "reason": "识别到基因符号，检索该基因的剪接事件",
+                }
+            if (
+                "项目" in question
+                and any(word in question for word in ("列表", "哪些", "多少"))
+                and entry_for("list_projects")
+            ):
+                return {
+                    "server": entry_for("list_projects")["server"],
+                    "tool": "list_projects",
+                    "arguments": {},
+                    "reason": "询问项目列表",
+                }
+            if entry_for("project_summary") and project_id:
+                return {
+                    "server": entry_for("project_summary")["server"],
+                    "tool": "project_summary",
+                    "arguments": {"project_id": project_id},
+                    "reason": "默认读取当前项目摘要",
+                }
+            if entry_for("list_projects"):
+                return {
+                    "server": entry_for("list_projects")["server"],
+                    "tool": "list_projects",
+                    "arguments": {},
+                    "reason": "未指定项目，先列出可用项目",
+                }
+            first = catalog[0]
+            return {
+                "server": first["server"],
+                "tool": first["name"],
+                "arguments": {},
+                "reason": "默认使用首个可用工具",
+            }
+
+        plan: dict[str, Any] | None = None
+        source = "rule"
+        llm_errors: list[Any] = []
+        try:
+            from splicegaip.llm.enrich import build_enhancer
+
+            enhancer = build_enhancer(_fresh_settings())
+            if enhancer.enabled and enhancer.has("plan"):
+                system = (
+                    "You route a user's request to exactly one MCP tool. "
+                    "Return JSON only with keys: server, tool, arguments, reason. "
+                    "Use only the provided servers/tools and their schema properties. "
+                    "Never invent project IDs; pick one from projects if needed. "
+                    "Prefer search_events for gene-level splicing questions, "
+                    "project_summary for whole-project questions, and "
+                    "explain_event_type for terminology questions."
+                )
+                user = json.dumps(
+                    {
+                        "question": question,
+                        "current_project": project_hint or None,
+                        "projects": project_ids,
+                        "tools": [
+                            {
+                                "server": item["server"],
+                                "tool": item["name"],
+                                "description": item["description"],
+                                "input_schema": item["input_schema"],
+                            }
+                            for item in catalog
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                candidate = await asyncio.to_thread(
+                    enhancer.json,
+                    system=system,
+                    user=user,
+                    feature="plan",
+                    max_tokens=600,
+                    timeout=40,
+                )
+                plan = sanitise(candidate)
+                if plan is not None:
+                    source = "llm"
+                llm_errors = enhancer.errors[-3:]
+        except Exception as error:  # noqa: BLE001 - fall back to deterministic routing
+            llm_errors = [{"error": str(error)}]
+
+        if plan is None:
+            plan = rule_plan()
+
+        started = time.perf_counter()
+        result = await client.call_tool(plan["server"], plan["tool"], plan["arguments"])
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "success": "error" not in result,
+            "error": result.get("error"),
+            "source": source,
+            "plan": plan,
+            "result": result,
+            "elapsed_ms": elapsed_ms,
+            "llm_errors": llm_errors,
+        }
 
     # ==================== Skills Endpoints ====================
 

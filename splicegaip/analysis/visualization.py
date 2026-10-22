@@ -83,7 +83,7 @@ def plot_volcano(
     if not points:
         ax.text(0.5, 0.5, "No events with both delta PSI and FDR", ha="center", va="center")
         ax.set_axis_off()
-        return _save(fig, output_dir, "volcano", "Splicing volcano plot", "placeholder")
+        return _save(fig, output_dir, "volcano", "Splicing volcano plot", "No events had both delta PSI and FDR values, so the volcano plot is empty.")
     deltas = np.array([point[0] for point in points])
     fdrs = np.array([max(point[1], 1e-300) for point in points])
     neg_log_fdr = -np.log10(fdrs)
@@ -116,7 +116,7 @@ def plot_event_type_counts(events: Sequence[StandardEvent], output_dir: Path) ->
     if not counts:
         ax.text(0.5, 0.5, "No events", ha="center", va="center")
         ax.set_axis_off()
-        return _save(fig, output_dir, "event_type_counts", "Event type composition", "placeholder")
+        return _save(fig, output_dir, "event_type_counts", "Event type composition", "No AS events were available for the event-type composition.")
     labels = sorted(counts)
     values = [counts[label] for label in labels]
     ax.bar(labels, values, color=COLOR_PRIMARY, alpha=0.85)
@@ -152,7 +152,7 @@ def plot_psi_heatmap(
     if not ranked or not sample_ids:
         ax.text(0.5, 0.5, "No per-sample PSI values available", ha="center", va="center")
         ax.set_axis_off()
-        return _save(fig, output_dir, "psi_heatmap", "PSI heatmap", "placeholder")
+        return _save(fig, output_dir, "psi_heatmap", "PSI heatmap", "No events with PSI values were available for the heatmap.")
     matrix = np.full((len(ranked), len(sample_ids)), np.nan)
     for row, event in enumerate(ranked):
         for column, sample_id in enumerate(sample_ids):
@@ -178,7 +178,7 @@ def plot_psi_heatmap(
             fontsize=7,
             color=COLOR_SECONDARY if group else COLOR_NEUTRAL,
         )
-    ax.set_title(f"PSI heatmap (top {len(ranked)} events by |delta PSI|)")
+    ax.set_title(f"PSI heatmap (top {len(ranked)} events by |delta PSI|)", pad=52)
     ax.grid(False)
     bar = fig.colorbar(image, ax=ax, shrink=0.7)
     bar.set_label("PSI")
@@ -212,7 +212,7 @@ def plot_psi_distribution(
         for ax in axes:
             ax.text(0.5, 0.5, "Insufficient data", ha="center", va="center")
             ax.set_axis_off()
-        return _save(fig, output_dir, "psi_distribution", "PSI distribution", "placeholder")
+        return _save(fig, output_dir, "psi_distribution", "PSI distribution", "No PSI values were available for the distribution plot.")
     for ax, group in zip(axes, groups[:2]):
         group_samples = [sample.sample_id for sample in samples if sample.group == group]
         data = []
@@ -264,7 +264,7 @@ def plot_candidate_ranking(
     if not top:
         ax.text(0.5, 0.5, "No candidates", ha="center", va="center")
         ax.set_axis_off()
-        return _save(fig, output_dir, "candidate_ranking", "Candidate ranking", "placeholder")
+        return _save(fig, output_dir, "candidate_ranking", "Candidate ranking", "No ranked candidates were available.")
     labels = [f"{item.gene_symbol or item.gene_id} ({item.event_type})" for item in top][::-1]
     scores = [item.score for item in top][::-1]
     colors = [COLOR_SECONDARY if item.score >= 0.6 else COLOR_PRIMARY for item in top][::-1]
@@ -294,7 +294,7 @@ def plot_enrichment(
     if not top:
         ax.text(0.5, 0.5, "No enriched terms", ha="center", va="center")
         ax.set_axis_off()
-        return _save(fig, output_dir, "enrichment", "Functional enrichment", "placeholder")
+        return _save(fig, output_dir, "enrichment", "Functional enrichment", "No enriched terms: supply a gene annotation table to enable functional enrichment.")
     labels = [f"{item.term} [{item.ontology}]" for item in top][::-1]
     fold = [min(item.fold_enrichment, 50.0) for item in top][::-1]
     fdr = [max(item.fdr, 1e-6) for item in top][::-1]

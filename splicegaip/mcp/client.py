@@ -1,9 +1,14 @@
 """MCP client wrapper for SpliceGAIP.
 
-Manages connections to external MCP servers and provides a unified
-interface for tool discovery and invocation. Designed to work both
-in development mode (with full MCP SDK) and in packaged EXE mode
-(with lightweight HTTP-based MCP calls).
+Supports the official Model Context Protocol transports (``stdio``, ``sse``
+and ``streamable-http``) through the ``mcp`` SDK, plus a tiny JSON-over-HTTP
+adapter for the built-in demo server so the feature also works in packaged
+builds where spawning Python subprocesses is not practical.
+
+SDK sessions are intentionally short-lived: each probe/list/call opens a
+session, finishes, and closes it inside the same asyncio task. Holding an
+anyio-based MCP session across FastAPI requests triggers cancel-scope errors
+and makes cleanup depend on request scheduling.
 """
 
 from __future__ import annotations
@@ -11,11 +16,15 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
+
+BUILTIN_SERVER_NAME = "splicegaip-builtin"
+BUILTIN_SERVER_URL = "http://127.0.0.1:9100"
 
 
 @dataclass
@@ -23,11 +32,19 @@ class MCPServerConfig:
     """Configuration for one MCP server."""
 
     name: str
-    transport: str = "stdio"  # stdio | sse | http
+    transport: str = "stdio"  # stdio | sse | http (streamable-http)
     command: str | None = None  # For stdio transport
-    url: str | None = None  # For SSE/HTTP transport
+    args: list[str] = field(default_factory=list)
+    url: str | None = None  # For sse/http transport
     env: dict[str, str] = field(default_factory=dict)
+    cwd: str | None = None
     timeout: float = 30.0
+    # auto: try official MCP first, then the simple /tools JSON adapter
+    # simple: only the built-in /health + /tools/list + /tools/call adapter
+    # mcp: only the official MCP SDK transports
+    protocol: str = "auto"
+    enabled: bool = True
+    builtin: bool = False
 
 
 @dataclass
@@ -41,114 +58,265 @@ class MCPToolInfo:
 
 
 class MCPClient:
-    """Lightweight MCP client that works in both dev and EXE modes.
-
-    In development: uses the full mcp Python package with stdio/sse transports.
-    In EXE mode: uses direct HTTP calls to locally-running MCP servers.
-
-    This dual-mode design ensures MCP functionality survives PyInstaller
-    packaging while maintaining full feature parity during development.
-    """
+    """MCP client that works with standard servers and the built-in adapter."""
 
     def __init__(self, config_dir: Path | None = None):
         self.config_dir = config_dir or Path.home() / ".splicegaip" / "mcp"
+        self.config_path = self.config_dir / "servers.json"
         self.servers: dict[str, MCPServerConfig] = {}
         self._tools_cache: dict[str, list[MCPToolInfo]] = {}
         self._http_clients: dict[str, httpx.AsyncClient] = {}
+        self._sdk_ready: set[str] = set()
+        self._sdk_urls: dict[str, str] = {}
+        self._connected_via: dict[str, str] = {}
         self._load_config()
 
+    # -- configuration ----------------------------------------------------
     def _load_config(self) -> None:
         """Load MCP server configuration from JSON file."""
-        config_file = self.config_dir / "servers.json"
-        if not config_file.exists():
+        if self.config_path.exists():
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+                for server_data in data.get("servers", []):
+                    name = str(server_data.get("name", "")).strip()
+                    if not name:
+                        continue
+                    self.servers[name] = MCPServerConfig(
+                        name=name,
+                        transport=str(server_data.get("transport", "stdio")).lower(),
+                        command=server_data.get("command"),
+                        args=list(server_data.get("args", []) or []),
+                        url=server_data.get("url"),
+                        env=dict(server_data.get("env", {}) or {}),
+                        cwd=server_data.get("cwd"),
+                        timeout=float(server_data.get("timeout", 30.0)),
+                        protocol=str(server_data.get("protocol", "auto")).lower(),
+                        enabled=bool(server_data.get("enabled", True)),
+                        builtin=bool(server_data.get("builtin", False)),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[MCP] Failed to load config: {exc}")
+
+        # The in-process demo server is always available, even without a config.
+        self.servers.setdefault(
+            BUILTIN_SERVER_NAME,
+            MCPServerConfig(
+                name=BUILTIN_SERVER_NAME,
+                transport="http",
+                url=BUILTIN_SERVER_URL,
+                protocol="simple",
+                timeout=10.0,
+                builtin=True,
+            ),
+        )
+
+    # -- official MCP SDK sessions ---------------------------------------
+    @asynccontextmanager
+    async def _open_sdk_session(
+        self,
+        server: MCPServerConfig,
+        url: str | None = None,
+    ) -> AsyncIterator[Any]:
+        try:
+            from mcp import ClientSession
+        except ImportError as error:
+            raise RuntimeError(
+                "the 'mcp' SDK is not installed; standard MCP servers are unavailable"
+            ) from error
+
+        transport = server.transport.replace("_", "-")
+        if transport == "stdio":
+            if not server.command:
+                raise ValueError("stdio server requires a command")
+            from mcp.client.stdio import StdioServerParameters, stdio_client
+
+            params = StdioServerParameters(
+                command=server.command,
+                args=server.args,
+                env={**os.environ, **server.env},
+                cwd=server.cwd or None,
+            )
+            async with stdio_client(params) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await asyncio.wait_for(session.initialize(), timeout=server.timeout)
+                    yield session
             return
 
-        try:
-            with open(config_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        if transport == "sse":
+            from mcp.client.sse import sse_client
 
-            for server_data in data.get("servers", []):
-                server = MCPServerConfig(
-                    name=server_data["name"],
-                    transport=server_data.get("transport", "stdio"),
-                    command=server_data.get("command"),
-                    url=server_data.get("url"),
-                    env=server_data.get("env", {}),
-                    timeout=server_data.get("timeout", 30.0),
+            target = url or server.url
+            if not target:
+                raise ValueError("sse server requires a url")
+            async with sse_client(target, timeout=server.timeout) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await asyncio.wait_for(session.initialize(), timeout=server.timeout)
+                    yield session
+            return
+
+        if not (url or server.url):
+            raise ValueError("http server requires a url")
+        try:
+            from mcp.client.streamable_http import (
+                streamable_http_client as open_transport,
+            )
+        except ImportError:
+            from mcp.client.streamable_http import (
+                streamablehttp_client as open_transport,  # type: ignore[no-redef]
+            )
+        target = url or server.url
+        assert target is not None
+        async with open_transport(target) as streams:
+            async with ClientSession(streams[0], streams[1]) as session:
+                await asyncio.wait_for(
+                    session.initialize(), timeout=min(server.timeout, 15.0)
                 )
-                self.servers[server.name] = server
-        except Exception as exc:  # noqa: BLE001
-            print(f"[MCP] Failed to load config: {exc}")
+                yield session
 
-    async def connect(self, server_name: str) -> bool:
-        """Connect to an MCP server.
+    @staticmethod
+    def _sdk_tools(server_name: str, result: Any) -> list[MCPToolInfo]:
+        return [
+            MCPToolInfo(
+                name=tool.name,
+                description=getattr(tool, "description", "") or "",
+                input_schema=(
+                    getattr(tool, "inputSchema", None)
+                    or getattr(tool, "input_schema", None)
+                    or {}
+                ),
+                server_name=server_name,
+            )
+            for tool in getattr(result, "tools", [])
+        ]
 
-        Returns True if connection succeeded, False otherwise.
-        """
-        server = self.servers.get(server_name)
-        if not server:
-            return False
-
+    async def _probe_sdk(
+        self,
+        server: MCPServerConfig,
+        mode: str,
+        url: str | None = None,
+    ) -> bool:
         try:
-            if server.transport in ("sse", "http"):
-                if not server.url:
-                    return False
-                client = httpx.AsyncClient(base_url=server.url, timeout=server.timeout)
-                # Test connectivity
-                response = await client.get("/health")
-                if response.status_code == 200:
-                    self._http_clients[server_name] = client
-                    return True
-            elif server.transport == "stdio":
-                # In EXE mode, stdio servers are not supported
-                # Fall back to HTTP if available
-                if server.url:
-                    return await self.connect(server_name)
-                return False
+            async with self._open_sdk_session(server, url=url) as session:
+                result = await session.list_tools()
+            self._tools_cache[server.name] = self._sdk_tools(server.name, result)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[MCP] SDK probe failed for {server.name}: {exc}")
+            self._sdk_ready.discard(server.name)
+            return False
+        self._sdk_ready.add(server.name)
+        self._connected_via[server.name] = mode
+        if url:
+            self._sdk_urls[server.name] = url
+        return True
+
+    # -- connection -------------------------------------------------------
+    async def connect(self, server_name: str) -> bool:
+        """Probe a configured MCP server. Returns True on success."""
+        server = self.servers.get(server_name)
+        if server is None or not server.enabled:
+            return False
+        if server_name in self._http_clients or server_name in self._sdk_ready:
+            return True
+
+        transport = server.transport.replace("_", "-")
+        try:
+            if transport == "stdio":
+                return await self._probe_sdk(server, "mcp-stdio")
+            if transport == "sse":
+                return await self._probe_sdk(server, "mcp-sse")
+            if transport in ("http", "streamable-http", "simple"):
+                return await self._connect_http(server)
         except Exception as exc:  # noqa: BLE001
             print(f"[MCP] Connection failed for {server_name}: {exc}")
+        return False
+
+    async def _connect_http(self, server: MCPServerConfig) -> bool:
+        if not server.url:
             return False
 
+        if server.protocol in ("auto", "mcp"):
+            candidates = [server.url]
+            if not server.url.rstrip("/").endswith("/mcp"):
+                candidates.append(server.url.rstrip("/") + "/mcp")
+            for url in candidates:
+                if await self._probe_sdk(server, "mcp-http", url=url):
+                    return True
+            if server.protocol == "mcp":
+                return False
+
+        client = httpx.AsyncClient(base_url=server.url, timeout=server.timeout)
+        try:
+            response = await client.get("/health")
+            if response.status_code == 200:
+                self._http_clients[server.name] = client
+                self._connected_via[server.name] = "simple-http"
+                return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"[MCP] Connection failed for {server.name}: {exc}")
+        await client.aclose()
         return False
 
     async def disconnect(self, server_name: str) -> None:
-        """Disconnect from an MCP server."""
-        if server_name in self._http_clients:
-            await self._http_clients[server_name].aclose()
-            del self._http_clients[server_name]
+        """Forget a server's connection state and cached tools."""
+        client = self._http_clients.pop(server_name, None)
+        if client is not None:
+            await client.aclose()
+        self._sdk_ready.discard(server_name)
+        self._sdk_urls.pop(server_name, None)
         self._tools_cache.pop(server_name, None)
+        self._connected_via.pop(server_name, None)
 
+    async def refresh(self, server_name: str) -> bool:
+        await self.disconnect(server_name)
+        return await self.connect(server_name)
+
+    # -- tools ------------------------------------------------------------
     async def list_tools(self, server_name: str) -> list[MCPToolInfo]:
         """List all tools available from an MCP server."""
         if server_name in self._tools_cache:
             return self._tools_cache[server_name]
 
-        client = self._http_clients.get(server_name)
-        if not client:
-            connected = await self.connect(server_name)
-            if not connected:
-                return []
-            client = self._http_clients.get(server_name)
-            if not client:
+        server = self.servers.get(server_name)
+        if server is None:
+            return []
+
+        if server_name in self._sdk_ready:
+            try:
+                async with self._open_sdk_session(
+                    server, url=self._sdk_urls.get(server_name)
+                ) as session:
+                    result = await session.list_tools()
+                tools = self._sdk_tools(server_name, result)
+                self._tools_cache[server_name] = tools
+                return tools
+            except Exception as exc:  # noqa: BLE001
+                print(f"[MCP] Failed to list tools for {server_name}: {exc}")
                 return []
 
+        client = self._http_clients.get(server_name)
+        if client is None:
+            if not await self.connect(server_name):
+                return []
+            client = self._http_clients.get(server_name)
+            if client is None:
+                # SDK servers cache their tools during connect().
+                return self._tools_cache.get(server_name, [])
+
         try:
-            # MCP protocol: list tools via /tools endpoint
             response = await client.post("/tools/list", json={})
             if response.status_code != 200:
                 return []
-
             data = response.json()
-            tools = []
-            for tool_data in data.get("tools", []):
-                tool = MCPToolInfo(
+            tools = [
+                MCPToolInfo(
                     name=tool_data["name"],
                     description=tool_data.get("description", ""),
                     input_schema=tool_data.get("inputSchema", {}),
                     server_name=server_name,
                 )
-                tools.append(tool)
-
+                for tool_data in data.get("tools", [])
+            ]
             self._tools_cache[server_name] = tools
             return tools
         except Exception as exc:  # noqa: BLE001
@@ -161,41 +329,92 @@ class MCPClient:
         tool_name: str,
         arguments: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Call an MCP tool and return the result.
+        """Call an MCP tool and return a JSON-serialisable result."""
+        server = self.servers.get(server_name)
+        if server is None or not server.enabled:
+            return {"error": f"Unknown or disabled server: {server_name}"}
 
-        Args:
-            server_name: Name of the MCP server
-            tool_name: Name of the tool to call
-            arguments: Tool arguments matching the input schema
+        if server_name not in self._sdk_ready and server_name not in self._http_clients:
+            if not await self.connect(server_name):
+                return {"error": f"Cannot connect to server: {server_name}"}
 
-        Returns:
-            Tool result as a dictionary
-        """
+        if server_name in self._sdk_ready:
+            try:
+                async with self._open_sdk_session(
+                    server, url=self._sdk_urls.get(server_name)
+                ) as session:
+                    result = await session.call_tool(tool_name, arguments or {})
+                payload = self._normalise_payload(self._serialise_result(result))
+                if payload.get("isError"):
+                    return {"error": self._result_text(payload), "result": payload}
+                return payload
+            except Exception as exc:  # noqa: BLE001
+                return {"error": f"Tool call exception: {exc}"}
+
         client = self._http_clients.get(server_name)
-        if not client:
-            connected = await self.connect(server_name)
-            if not connected:
-                return {"error": f"Cannot connect to server: {server_name}"}
-            client = self._http_clients.get(server_name)
-            if not client:
-                return {"error": f"Cannot connect to server: {server_name}"}
-
+        if client is None:
+            return {"error": f"Cannot connect to server: {server_name}"}
         try:
             response = await client.post(
                 "/tools/call",
                 json={"name": tool_name, "arguments": arguments or {}},
             )
-
             if response.status_code != 200:
-                return {"error": f"Tool call failed: HTTP {response.status_code}"}
-
-            return response.json()
+                detail = response.text[:300]
+                return {"error": f"Tool call failed: HTTP {response.status_code} {detail}"}
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("isError"):
+                return {"error": self._result_text(payload), "result": payload}
+            return payload
         except Exception as exc:  # noqa: BLE001
-            return {"error": f"Tool call exception: {str(exc)}"}
+            return {"error": f"Tool call exception: {exc}"}
+
+    @staticmethod
+    def _normalise_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        """Expose the same keys for SDK (snake_case) and simple-HTTP results."""
+        if "structuredContent" not in payload and "structured_content" in payload:
+            payload["structuredContent"] = payload["structured_content"]
+        if "isError" not in payload and "is_error" in payload:
+            payload["isError"] = bool(payload["is_error"])
+        structured = payload.get("structuredContent")
+        # MCPServer may wrap a dict return as {"result": "<json string>"}.
+        if isinstance(structured, dict) and set(structured) == {"result"}:
+            inner = structured["result"]
+            if isinstance(inner, str):
+                try:
+                    payload["structuredContent"] = json.loads(inner)
+                except json.JSONDecodeError:
+                    pass
+        return payload
+
+    @staticmethod
+    def _serialise_result(result: Any) -> dict[str, Any]:
+        if hasattr(result, "model_dump"):
+            try:
+                data = result.model_dump(mode="json", exclude_none=True)
+            except TypeError:
+                data = result.model_dump()
+            if isinstance(data, dict):
+                return data
+        if isinstance(result, dict):
+            return result
+        return {"content": [{"type": "text", "text": str(result)}]}
+
+    @staticmethod
+    def _result_text(payload: dict[str, Any]) -> str:
+        parts = [
+            str(item.get("text", ""))
+            for item in payload.get("content", [])
+            if isinstance(item, dict) and item.get("type") == "text"
+        ]
+        text = "\n".join(part for part in parts if part)
+        if text:
+            return text
+        return json.dumps(payload, ensure_ascii=False, default=str)
 
     async def close_all(self) -> None:
-        """Close all server connections."""
-        for server_name in list(self._http_clients.keys()):
+        """Close all HTTP connections and reset SDK flags."""
+        for server_name in list(self._http_clients) + list(self._sdk_ready):
             await self.disconnect(server_name)
 
 
@@ -209,20 +428,13 @@ def get_mcp_client() -> MCPClient:
 
 
 async def mcp_list_servers() -> dict[str, list[str]]:
-    """List all configured MCP servers and their available tools.
-
-    Returns:
-        Dict mapping server names to lists of tool names
-    """
+    """List configured MCP servers and their tool names (connected only)."""
     client = get_mcp_client()
-    result = {}
-
+    result: dict[str, list[str]] = {}
     for server_name in client.servers:
-        connected = await client.connect(server_name)
-        if connected:
+        if await client.connect(server_name):
             tools = await client.list_tools(server_name)
             result[server_name] = [tool.name for tool in tools]
-
     return result
 
 
@@ -231,15 +443,6 @@ async def mcp_call_tool(
     tool_name: str,
     arguments: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Call an MCP tool (synchronous wrapper).
-
-    Args:
-        server_name: MCP server name
-        tool_name: Tool name
-        arguments: Tool arguments
-
-    Returns:
-        Tool result or error dict
-    """
+    """Call an MCP tool through the shared client."""
     client = get_mcp_client()
     return await client.call_tool(server_name, tool_name, arguments)
