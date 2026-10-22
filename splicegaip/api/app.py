@@ -334,7 +334,7 @@ def create_app() -> FastAPI:
 
         run_settings = _with_overrides(settings, payload.get("thresholds"))
         try:
-            outcome = run_analysis(query, input_dir, settings=run_settings)
+            outcome = run_analysis(query, input_dir, settings=run_settings, project_name=str(payload.get("project_name") or "").strip()[:120])
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         return JSONResponse(outcome.summary())
@@ -402,6 +402,20 @@ def create_app() -> FastAPI:
         except Exception as error:  # noqa: BLE001 - surface a useful 500
             logger.exception("Ingestion apply failed")
             raise HTTPException(status_code=500, detail=f"Ingestion apply failed: {error}") from error
+
+    @app.post("/api/ingest/groups")
+    def ingest_groups(payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist confirmed sample groups for an already recognized input."""
+        from splicegaip.data.ingestion import apply_native_groups
+
+        directory = _ingest_input_dir(str(payload.get("input_dir", "")))
+        groups = payload.get("sample_groups")
+        if not isinstance(groups, dict):
+            raise HTTPException(status_code=400, detail="sample_groups is required")
+        try:
+            return apply_native_groups(directory, groups)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.post("/api/upload")
     async def upload(files: list[UploadFile] = File(...)) -> dict[str, Any]:

@@ -350,10 +350,11 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
           </div>
           <div class="card">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
-              <div style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary);">最近项目</div>
+              <div style="font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-secondary);">历史项目</div>
               <button class="btn btn-sm btn-secondary" onclick="loadDashboard()">刷新</button>
             </div>
-            <div id="recent-projects">
+            <input id="project-search" type="search" placeholder="搜索历史项目" oninput="renderProjectHistory()" style="width:100%;margin-bottom:12px;padding:9px;border:1px solid var(--border);border-radius:6px;">
+            <div id="recent-projects" style="max-height:440px;overflow:auto;">
               <div style="padding: 40px; text-align: center; color: var(--text-muted);">
                 <div style="font-size: 48px; margin-bottom: 12px; opacity: 0.3;">📁</div>
                 <div style="font-size: 14px;">暂无项目</div>
@@ -807,7 +808,7 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 
 <script src="agent_chat_ui.js"></script>
 <script>
-const state = { currentProject: null, projects: [], analysis状态: null, events: [], currentPage: 'dashboard' };
+const state = { currentProject: localStorage.getItem('splicegaip.currentProject'), projects: [], analysis状态: null, events: [], currentPage: 'dashboard' };
 document.querySelectorAll('.nav-item').forEach(item => { item.addEventListener('click', () => { navigateTo(item.dataset.page); }); });
 function navigateTo(page) {
   document.querySelectorAll('.nav-item').forEach(item => { item.classList.toggle('active', item.dataset.page === page); });
@@ -827,10 +828,12 @@ async function loadDashboard() {
   const projectsData = response.projects || response || [];
   state.projects = Array.isArray(projectsData) ? projectsData : [];
   
-  // Get latest project status for stats
+  // Keep the selected historical project across refreshes.
   if (state.projects.length > 0) {
-    const latestProject = state.projects[0];
-    const status = await apiCall(`/status/${latestProject.project_id}`);
+    const selectedProject = state.projects.find(p => p.project_id === state.currentProject) || state.projects[0];
+    state.currentProject = selectedProject.project_id;
+    localStorage.setItem('splicegaip.currentProject', state.currentProject);
+    const status = await apiCall(`/status/${selectedProject.project_id}`);
     
     if (status) {
       document.getElementById('stat-samples').textContent = (status.samples || []).length;
@@ -843,8 +846,7 @@ async function loadDashboard() {
       document.getElementById('stat-significant').textContent = significantCount;
       
       // Update current project
-      state.currentProject = latestProject.project_id;
-      document.getElementById('current-project').textContent = latestProject.name || latestProject.project_id;
+      document.getElementById('current-project').textContent = selectedProject.name || selectedProject.project_id;
     }
   } else {
     document.getElementById('stat-samples').textContent = '-';
@@ -852,16 +854,21 @@ async function loadDashboard() {
     document.getElementById('stat-significant').textContent = '-';
   }
   
+  renderProjectHistory();
+}
+function renderProjectHistory() {
   const projectsList = document.getElementById('recent-projects');
+  const term = (document.getElementById('project-search')?.value || '').toLowerCase();
+  const projects = state.projects.filter(p => ((p.name || '') + ' ' + (p.project_id || '') + ' ' + (p.query || '')).toLowerCase().includes(term));
   if (state.projects.length === 0) { 
     projectsList.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">暂无项目</div>'; 
   } else { 
-    projectsList.innerHTML = state.projects.slice(0, 5).map(p => 
-      `<div style="padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer;" onclick="selectProject('${p.project_id}')">
-        <div style="font-weight: 600;">${p.name || p.project_id}</div>
-        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${p.query || '分析查询'}</div>
+    projectsList.innerHTML = projects.map(p =>
+      `<div style="padding: 12px; border-bottom: 1px solid var(--border); cursor: pointer; ${p.project_id === state.currentProject ? 'background:var(--gray-100);' : ''}" onclick="selectProject('${ingestEsc(p.project_id)}')">
+        <div style="font-weight: 600;">${ingestEsc(p.name || p.project_id)}</div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">${ingestEsc(p.created_at || '')} · ${ingestEsc(p.query || '分析查询')}</div>
       </div>`
-    ).join(''); 
+    ).join('') || '<div style="padding:20px;text-align:center;color:var(--text-muted);">没有匹配的项目</div>';
   }
 }
 async function loadPipeline() {
@@ -1276,7 +1283,7 @@ async function generateReport(format) {
     `; 
   }
 }
-function selectProject(projectId) { state.currentProject = projectId; document.getElementById('current-project').textContent = projectId; loadDashboard(); }
+function selectProject(projectId) { state.currentProject = projectId; localStorage.setItem('splicegaip.currentProject', projectId); loadDashboard(); }
 function refreshData() { if (state.currentPage === 'dashboard') loadDashboard(); if (state.currentPage === 'pipeline') loadPipeline(); if (state.currentPage === 'explorer') loadExplorer(); }
 
 // Upload Modal Functions
@@ -1445,7 +1452,7 @@ async function startAnalysis() {
       console.warn('ingest preview unavailable:', previewError);
     }
 
-    if (preview && preview.native && (!preview.validation || preview.validation.ok)) {
+    if (preview && preview.native && (!preview.validation || preview.validation.ok) && !(preview.sample_ids || []).length) {
       statusDiv.innerHTML = '<span class="status status-running"><span class="status-dot"></span>已识别标准格式，开始分析...</span>';
       runAnalysisOnDir(analysisQuery, uploadDir, projectName, statusDiv);
       return;
@@ -1476,6 +1483,7 @@ function runAnalysisOnDir(analysisQuery, inputDir, projectName, statusDiv) {
       const list = (resp && resp.projects) || [];
       if (list.length > 0 && list[0].project_id !== prevLatest && state.currentProject !== list[0].project_id) {
         state.currentProject = list[0].project_id;
+        localStorage.setItem('splicegaip.currentProject', state.currentProject);
         document.getElementById('current-project').textContent = state.currentProject;
       }
       if (state.currentProject) loadPipeline();
@@ -1497,6 +1505,7 @@ function runAnalysisOnDir(analysisQuery, inputDir, projectName, statusDiv) {
     const analyzeResult = await analyzeResponse.json();
     if (analyzeResult && analyzeResult.project_id) {
       state.currentProject = analyzeResult.project_id;
+      localStorage.setItem('splicegaip.currentProject', state.currentProject);
       document.getElementById('current-project').textContent = state.currentProject;
     }
     statusDiv.innerHTML = '<span class="status status-completed"><span class="status-dot"></span>已完成</span>';
@@ -1576,9 +1585,13 @@ function showIngestModal(data, context) {
     data: data,
     context: context,
     mapping: JSON.parse(JSON.stringify(data.mapping || {})),
-    applying: false
+    applying: false,
+    groupLabels: []
   };
   if (!ingestState.mapping.columns) ingestState.mapping.columns = {};
+  if (!ingestState.mapping.sample_groups) ingestState.mapping.sample_groups = {};
+  const suggested = [...new Set(Object.values(ingestState.mapping.sample_groups).filter(Boolean))];
+  ingestState.groupLabels = [suggested[0] || 'Control', suggested[1] || 'Treatment'];
   const modal = document.getElementById('ingest-modal');
   if (modal) modal.classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -1617,7 +1630,7 @@ function renderIngestModal() {
   if (!body || !confirmBtn) return;
 
   let subText = ingestT('Agent 已读取数据结构。确认字段映射后，将标准化并进入原有分析流程。', 'The agent has read the data structure. Confirm the field mapping to standardize and continue to analysis.');
-  if (native) subText = ingestT('已识别标准格式，但数据校验未通过。请修正数据后重新上传。', 'The native format was recognized, but validation failed. Fix the data and upload again.');
+  if (native) subText = ingestT('请核对每个样本的分组，确认后开始分析。', 'Review each sample group before analysis.');
   if (unmappable) subText = ingestT('未能从这些文件中识别出可分析的剪接事件表。', 'No analyzable splicing event table could be recognized in these files.');
   if (title) title.textContent = ingestT('智能接入检查', 'Smart ingestion review');
   if (sub) sub.textContent = subText;
@@ -1693,6 +1706,20 @@ function renderIngestModal() {
     html.push('<div><div class="ingest-section-title">' + ingestEsc(ingestT('字段映射', 'Field mapping')) + '</div><div class="ingest-map-grid">' + rows.join('') + '</div></div>');
   }
 
+  const sampleIds = data.sample_ids || [];
+  if (sampleIds.length) {
+    const labels = ingestState.groupLabels;
+    const assignments = ingestState.mapping.sample_groups;
+    html.push('<div><div class="ingest-section-title">' + ingestEsc(ingestT('样本分组确认', 'Confirm sample groups')) + '</div>' +
+      '<div style="display:flex;gap:8px;margin:8px 0"><input data-group-label="0" value="' + ingestEsc(labels[0]) + '" oninput="ingestGroupLabelChanged(this)" aria-label="Group 1" placeholder="Group 1" style="width:48%;padding:8px"><input data-group-label="1" value="' + ingestEsc(labels[1]) + '" oninput="ingestGroupLabelChanged(this)" aria-label="Group 2" placeholder="Group 2" style="width:48%;padding:8px"></div>' +
+      '<div class="ingest-map-grid">' + sampleIds.map(function (sampleId) {
+        const current = assignments[sampleId] || '';
+        return '<div class="ingest-map-row"><label>' + ingestEsc(sampleId) + '</label><select data-sample-id="' + ingestEsc(sampleId) + '" onchange="ingestGroupChanged(this)"><option value="">' + ingestEsc(ingestT('— 请选择 —', '— Select —')) + '</option><option value="0"' + (current === labels[0] ? ' selected' : '') + '>' + ingestEsc(labels[0]) + '</option><option value="1"' + (current === labels[1] ? ' selected' : '') + '>' + ingestEsc(labels[1]) + '</option></select></div>';
+      }).join('') + '</div></div>');
+  } else {
+    html.push('<div class="ingest-issue warning">' + ingestEsc(ingestT('没有每样本 PSI 数据，无法生成真实的样本箱线图或热图。', 'No per-sample PSI data: sample box plots and heatmaps cannot be generated.')) + '</div>');
+  }
+
   if (issues.length) {
     const items = issues.map(function (issue) {
       const severity = issue.severity === 'error' ? 'error' : (issue.severity === 'warning' ? 'warning' : 'info');
@@ -1719,7 +1746,7 @@ function renderIngestModal() {
 
   if (cancelBtn) cancelBtn.textContent = ingestT('取消', 'Cancel');
   if (!ingestState.applying) {
-    if (native || unmappable) {
+    if (unmappable || (native && data.validation && !data.validation.ok)) {
       confirmBtn.disabled = true;
       confirmBtn.textContent = unmappable
         ? ingestT('无法自动标准化', 'Cannot standardize')
@@ -1741,10 +1768,32 @@ function ingestSelectChanged(select) {
   updateIngestConfirmState();
 }
 
+function ingestGroupChanged(select) {
+  if (!ingestState) return;
+  const sampleId = select.getAttribute('data-sample-id');
+  ingestState.mapping.sample_groups[sampleId] = select.value === '' ? '' : ingestState.groupLabels[Number(select.value)];
+  updateIngestConfirmState();
+}
+
+function ingestGroupLabelChanged(input) {
+  if (!ingestState) return;
+  const index = Number(input.getAttribute('data-group-label'));
+  const oldLabel = ingestState.groupLabels[index];
+  const newLabel = input.value.trim();
+  ingestState.groupLabels[index] = newLabel;
+  Object.keys(ingestState.mapping.sample_groups).forEach(function (id) {
+    if (ingestState.mapping.sample_groups[id] === oldLabel) ingestState.mapping.sample_groups[id] = newLabel;
+  });
+  document.querySelectorAll('#ingest-body select[data-sample-id]').forEach(function (select) {
+    select.options[index + 1].textContent = newLabel;
+  });
+  updateIngestConfirmState();
+}
+
 function updateIngestConfirmState() {
   if (!ingestState) return;
   const data = ingestState.data || {};
-  if (data.native || data.status === 'unmappable') return;
+  if (data.status === 'unmappable') return;
   const confirmBtn = document.getElementById('ingest-confirm');
   if (!confirmBtn || ingestState.applying) return;
   const columns = {};
@@ -1753,10 +1802,13 @@ function updateIngestConfirmState() {
   });
   const preview = data.preview || {};
   const validation = preview.validation || data.validation || {};
+  const sampleIds = data.sample_ids || [];
+  const groupLabels = ingestState.groupLabels || [];
+  const groupsReady = !sampleIds.length || (groupLabels[0] && groupLabels[1] && groupLabels[0] !== groupLabels[1] && sampleIds.every(id => groupLabels.includes(ingestState.mapping.sample_groups[id])) && new Set(sampleIds.map(id => ingestState.mapping.sample_groups[id])).size === 2);
   const missingGene = !columns.gene_symbol && !columns.gene_id;
   const hasDelta = !!columns.delta_PSI || (!!columns.mean_PSI_group1 && !!columns.mean_PSI_group2) || Number(preview.sample_psi_columns || 0) > 0;
   const hasSignificance = !!columns.FDR || !!columns.p_value;
-  const ready = Number(validation.error_count || 0) === 0 && !missingGene && hasDelta && hasSignificance;
+  const ready = groupsReady && (data.native ? Number(validation.error_count || 0) === 0 : (!missingGene && hasDelta && hasSignificance));
   confirmBtn.disabled = !ready;
   confirmBtn.textContent = ready ? ingestT('确认映射并分析', 'Confirm & analyze') : ingestT('请先补全映射', 'Complete the mapping');
 }
@@ -1768,6 +1820,31 @@ async function confirmIngest() {
   const errorDiv = document.getElementById('ingest-error');
   const confirmBtn = document.getElementById('ingest-confirm');
   if (errorDiv) errorDiv.textContent = '';
+
+  if (data.native) {
+    const sampleIds = data.sample_ids || [];
+    const groups = ingestState.mapping.sample_groups || {};
+    if (sampleIds.length && (sampleIds.some(id => !groups[id]) || new Set(sampleIds.map(id => groups[id])).size !== 2)) {
+      if (errorDiv) errorDiv.textContent = ingestT('请为每个样本选择分组，并确保两组都有样本。', 'Assign every sample and include both groups.');
+      return;
+    }
+    if (!sampleIds.length) { closeIngestModal(); runAnalysisOnDir(ctx.analysisQuery, ctx.uploadDir, ctx.projectName, ctx.statusDiv); return; }
+    ingestState.applying = true;
+    if (confirmBtn) confirmBtn.disabled = true;
+    try {
+      const response = await fetch('/api/ingest/groups', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({input_dir:ctx.uploadDir,sample_groups:groups})});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'HTTP ' + response.status);
+      ingestState.applying = false;
+      closeIngestModal();
+      runAnalysisOnDir(ctx.analysisQuery, result.path, ctx.projectName, ctx.statusDiv);
+    } catch (error) {
+      ingestState.applying = false;
+      if (errorDiv) errorDiv.textContent = error.message;
+      updateIngestConfirmState();
+    }
+    return;
+  }
 
   const columns = {};
   const selects = document.querySelectorAll('#ingest-body select[data-field]');
@@ -1799,6 +1876,8 @@ async function confirmIngest() {
 
   const mapping = JSON.parse(JSON.stringify(data.mapping || {}));
   mapping.columns = columns;
+  mapping.sample_groups = ingestState.mapping.sample_groups;
+  mapping.sample_groups_confirmed = (data.sample_ids || []).length > 0;
   if (data.event_file && data.event_file.name) mapping.event_file = data.event_file.name;
 
   ingestState.applying = true;

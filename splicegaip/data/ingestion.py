@@ -805,6 +805,11 @@ def _heuristic_mapping(profiles: Sequence[FileProfile]) -> tuple[dict[str, Any],
         inferred = {_infer_group(sample_id) for sample_id in candidate.sample_columns.values()}
         if {"Control", "Treatment"} <= inferred:
             mapping["groups"] = {"group1": "Control", "group2": "Treatment"}
+    if candidate.sample_columns:
+        mapping["sample_groups"] = {
+            sample_id: _infer_group(sample_id) or ""
+            for sample_id in candidate.sample_columns.values()
+        }
     return mapping, metadata, candidate
 
 
@@ -867,12 +872,14 @@ def _mapping_prompt(profiles: Sequence[FileProfile], heuristic: Mapping[str, Any
             "metadata_file": heuristic.get("metadata_file"),
             "columns": heuristic.get("columns", {}),
             "sample_columns": heuristic.get("sample_columns", {}),
+            "sample_groups": heuristic.get("sample_groups", {}),
             "event_type_map": heuristic.get("event_type_map", {}),
         },
         "rules": [
             "Use exact header strings from the file; do not translate or rename headers.",
             "Choose event_file from the supplied file names; metadata_file is optional.",
             "Per-sample PSI columns are those that hold one PSI value per sample; return them in sample_columns as {header: sample_id}.",
+            "Assign each listed sample ID to a biological group in sample_groups as {sample_id: group_label}. Use only the supplied sample IDs. Infer labels from sample names and metadata; leave uncertain samples empty for human review.",
             "Map event-type labels to SE/MXE/A5SS/A3SS/RI in event_type_map.",
             "delta_direction is 'group2-group1' or 'group1-group2'.",
             "Set fdr_from_p to true only when FDR must be approximated from the p-value column.",
@@ -883,6 +890,7 @@ def _mapping_prompt(profiles: Sequence[FileProfile], heuristic: Mapping[str, Any
             "metadata_file": "string or null",
             "columns": {"gene_symbol": "header", "delta_PSI": "header"},
             "sample_columns": {"PSI_S1": "S1"},
+            "sample_groups": {"S1": "Control"},
             "event_type_map": {"label": "SE"},
             "groups": {"group1": "label", "group2": "label"},
             "delta_direction": "group2-group1",
@@ -985,6 +993,23 @@ def _sanitize_mapping(
         mapping["sample_columns"] = sample_columns
     else:
         mapping.pop("sample_columns", None)
+    sample_ids = set(sample_columns.values())
+    sample_groups = {sample_id: str(group or "").strip() for sample_id, group in
+                     (heuristic.get("sample_groups") or {}).items() if sample_id in sample_ids}
+    if isinstance(raw.get("sample_groups"), Mapping):
+        for sample_id, group in raw["sample_groups"].items():
+            if sample_id not in sample_ids:
+                notes.append(f"unknown sample ID {sample_id!r}; ignored")
+                continue
+            label = str(group or "").strip()[:80]
+            if label:
+                sample_groups[sample_id] = label
+                accepted += 1
+            elif allow_clear:
+                sample_groups[sample_id] = ""
+    mapping["sample_groups"] = sample_groups
+    if raw.get("sample_groups_confirmed") is True:
+        mapping["sample_groups_confirmed"] = True
 
     proposed_types = raw.get("event_type_map")
     if isinstance(proposed_types, Mapping) and "event_type" in columns:
@@ -1171,12 +1196,15 @@ def _metadata_rows(
 def _synthesized_metadata(
     sample_columns: Mapping[str, str],
     issues: list[dict[str, str]],
+    sample_groups: Mapping[str, str] | None = None,
 ) -> list[SampleMetadata]:
     if not sample_columns:
         return []
-    inferred = {sample_id: _infer_group(sample_id) for sample_id in sample_columns.values()}
+    supplied = sample_groups or {}
+    inferred = {sample_id: str(supplied.get(sample_id) or _infer_group(sample_id) or "").strip()
+                for sample_id in sample_columns.values()}
     labels = {label for label in inferred.values() if label}
-    if not {"Control", "Treatment"} <= labels:
+    if len(labels) < 2 or any(not label for label in inferred.values()):
         issues.append(
             _issue(
                 "info",
@@ -1189,8 +1217,8 @@ def _synthesized_metadata(
     return [
         SampleMetadata(
             sample_id=sample_id,
-            group=inferred[sample_id] or "Group",
-            condition=inferred[sample_id] or "Group",
+            group=inferred[sample_id],
+            condition=inferred[sample_id],
         )
         for sample_id in sample_columns.values()
     ]
@@ -1481,8 +1509,20 @@ def _convert(
     )
     if metadata_profile is not None:
         conversion.samples = _metadata_rows(metadata_profile, mapping, issues)
-    elif sample_columns:
-        conversion.samples = _synthesized_metadata(sample_columns, issues)
+    if sample_columns and (not conversion.samples or mapping.get("sample_groups_confirmed")):
+        confirmed = _synthesized_metadata(sample_columns, issues, mapping.get("sample_groups"))
+        if confirmed:
+            previous = {sample.sample_id: sample for sample in conversion.samples}
+            conversion.samples = [
+                SampleMetadata(
+                    sample_id=sample.sample_id,
+                    group=sample.group,
+                    condition=sample.group,
+                    tissue=previous[sample.sample_id].tissue if sample.sample_id in previous else "",
+                    batch=previous[sample.sample_id].batch if sample.sample_id in previous else "",
+                )
+                for sample in confirmed
+            ]
 
     # Derive per-group means from per-sample PSI when the table only has samples.
     if conversion.samples and sample_columns and any(
@@ -1621,6 +1661,9 @@ def _native_preview(directory: Path) -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001 - native detection must never break preview
         return None
     validation = validate_dataset(dataset)
+    sample_ids = sorted({sample_id for event in dataset.events for sample_id in event.psi_by_sample})
+    known = {sample.sample_id: sample.group for sample in dataset.samples}
+    proposed = {sample_id: known.get(sample_id) or _infer_group(sample_id) or "" for sample_id in sample_ids}
     return {
         "status": "native",
         "native": True,
@@ -1637,7 +1680,8 @@ def _native_preview(directory: Path) -> dict[str, Any] | None:
             }
         ],
         "event_file": None,
-        "mapping": {},
+        "mapping": {"sample_groups": proposed} if sample_ids else {},
+        "sample_ids": sample_ids,
         "preview": {
             "total_rows": len(dataset.events),
             "valid_events": len(dataset.events),
@@ -1686,6 +1730,28 @@ def preview_ingestion(
 
     native = _native_preview(directory)
     if native is not None:
+        sample_ids = native.get("sample_ids") or []
+        if sample_ids and use_llm and not all(native["mapping"]["sample_groups"].values()):
+            try:
+                if enhancer is None:
+                    from splicegaip.llm.enrich import LLMEnhancer
+                    if settings is None:
+                        from splicegaip.config import load_settings
+                        settings = load_settings()
+                    enhancer = LLMEnhancer(settings, features=("ingest",))
+                if getattr(enhancer, "has", lambda _feature: False)("ingest"):
+                    proposal = enhancer.json(
+                        system=_INGEST_SYSTEM,
+                        user=json.dumps({"task": "Suggest biological group for each sample ID; leave uncertain groups empty. Return sample_groups only.", "sample_ids": sample_ids, "known_groups": native["mapping"]["sample_groups"]}, ensure_ascii=False),
+                        feature="ingest", max_tokens=1200, temperature=0.0, timeout=60,
+                    )
+                    if isinstance(proposal, Mapping) and isinstance(proposal.get("sample_groups"), Mapping):
+                        for sample_id, label in proposal["sample_groups"].items():
+                            if sample_id in sample_ids and str(label or "").strip():
+                                native["mapping"]["sample_groups"][sample_id] = str(label).strip()[:80]
+                        native["mapping_source"] = "llm+heuristic"
+            except Exception:  # noqa: BLE001 - group review remains available
+                pass
         native["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
         return native
 
@@ -1913,6 +1979,7 @@ def preview_ingestion(
         "event_file": event_file,
         "metadata_file": metadata_dict,
         "mapping": mapping,
+        "sample_ids": sorted(set(mapping.get("sample_columns", {}).values())),
         "mapping_fields": mapping_fields,
         "mapping_source": ("llm+heuristic" if llm_used else "heuristic"),
         "confidence": confidence,
@@ -2100,3 +2167,28 @@ def apply_ingestion(
         "issues": issues,
         "elapsed_ms": int((time.perf_counter() - started) * 1000),
     }
+
+
+def apply_native_groups(input_dir: str | Path, sample_groups: Mapping[str, str]) -> dict[str, Any]:
+    """Save a reviewed assignment for a recognized input in its upload directory."""
+    directory = Path(input_dir)
+    dataset = load_dataset(directory)
+    sample_ids = {sample_id for event in dataset.events for sample_id in event.psi_by_sample}
+    if not sample_ids:
+        raise ValueError("No per-sample PSI values are available for group assignment")
+    if set(sample_groups) != sample_ids:
+        raise ValueError("Group assignment must include exactly the observed sample IDs")
+    labels = {sample_id: str(sample_groups[sample_id]).strip() for sample_id in sample_ids}
+    if any(not label or len(label) > 80 for label in labels.values()) or len(set(labels.values())) != 2:
+        raise ValueError("Assign every sample to exactly one of two non-empty groups")
+    target = directory / "sample_metadata.csv"
+    with target.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["sample_id", "group", "condition"])
+        for sample_id in sorted(sample_ids):
+            writer.writerow([sample_id, labels[sample_id], labels[sample_id]])
+    validation = validate_dataset(load_dataset(directory))
+    if not validation.ok:
+        target.unlink(missing_ok=True)
+        raise ValueError("Group assignment produced an invalid dataset")
+    return {"path": str(directory), "sample_count": len(sample_ids), "groups": dict(Counter(labels.values()))}

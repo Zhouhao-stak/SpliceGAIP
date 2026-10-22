@@ -174,6 +174,7 @@ def run_analysis(
     *,
     settings: Settings | None = None,
     project_id: str | None = None,
+    project_name: str | None = None,
     output_root: str | Path | None = None,
     confirm_handler: Any | None = None,
 ) -> AnalysisOutcome:
@@ -198,7 +199,7 @@ def run_analysis(
     memory = ProjectMemory(settings.paths.memory_db)
     memory.create_project(
         project_id=project_id,
-        name=dataset.name,
+        name=(project_name or "").strip() or dataset.name,
         query=query,
         source_dir=str(dataset.source_dir),
         source_format=dataset.source_format,

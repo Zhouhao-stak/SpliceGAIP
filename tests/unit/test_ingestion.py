@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from splicegaip.data.ingestion import apply_ingestion, preview_ingestion
+from splicegaip.data.ingestion import apply_ingestion, apply_native_groups, preview_ingestion
 from splicegaip.data.loader import load_dataset
 from splicegaip.data.validator import validate_dataset
 
@@ -117,6 +117,42 @@ def test_native_standard_table_skips_mapping(tmp_path):
     assert data["validation"]["ok"] is True
 
 
+def test_confirmed_groups_create_sample_metadata_for_unlabeled_samples(tmp_path):
+    _write(tmp_path, "vendor.csv", "Gene,Type,Delta PSI,p,PSI_S1,PSI_S2,PSI_S3,PSI_S4\n"
+           "A,SE,0.4,0.001,0.2,0.3,0.7,0.8\n")
+    preview = preview_ingestion(tmp_path, use_llm=False)
+    assert preview["sample_ids"] == ["S1", "S2", "S3", "S4"]
+    assert preview["preview"]["sample_count"] == 0
+    mapping = preview["mapping"]
+    mapping["sample_groups"] = {"S1": "Baseline", "S2": "Baseline", "S3": "Drug", "S4": "Drug"}
+    mapping["sample_groups_confirmed"] = True
+    result = apply_ingestion(tmp_path, mapping)
+    dataset = load_dataset(result["path"])
+    assert dataset.groups == {"Baseline": ["S1", "S2"], "Drug": ["S3", "S4"]}
+    assert dataset.events[0].psi_by_sample["S4"] == pytest.approx(0.8)
+    from splicegaip.analysis.visualization import plot_psi_distribution, plot_psi_heatmap
+
+    figures = tmp_path / "figures"
+    heatmap = plot_psi_heatmap(dataset.events, dataset.samples, figures)
+    boxes = plot_psi_distribution(dataset.events, dataset.samples, figures)
+    assert (figures / "psi_heatmap.png").is_file()
+    assert (figures / "psi_distribution.png").is_file()
+    assert "No per-sample" not in heatmap.caption
+    assert "No PSI values" not in boxes.caption
+
+
+def test_native_group_confirmation_is_persisted(tmp_path):
+    _write(tmp_path, "AS_event_master.csv", "event_id,gene_id,gene_symbol,event_type,delta_PSI,FDR,PSI_S1,PSI_S2\n"
+           "E1,G1,GENE1,SE,0.4,0.001,0.2,0.8\n")
+    preview = preview_ingestion(tmp_path, use_llm=False)
+    assert preview["native"] is True
+    assert preview["sample_ids"] == ["S1", "S2"]
+    with pytest.raises(ValueError):
+        apply_native_groups(tmp_path, {"S1": "A", "S2": "A"})
+    apply_native_groups(tmp_path, {"S1": "A", "S2": "B"})
+    assert load_dataset(tmp_path).groups == {"A": ["S1"], "B": ["S2"]}
+
+
 def test_unmappable_directory_reports_error_and_apply_refuses(tmp_path):
     _write(tmp_path, "notes.csv", "author,comment\nAlice,hello\nBob,hello\n")
 
@@ -184,3 +220,20 @@ def test_hallucinated_llm_mapping_falls_back_to_heuristic(tmp_path):
     assert data["mapping"]["event_file"] == "messy_vendor.csv"
     assert data["mapping"]["columns"]["gene_symbol"] == "Gene Name"
     assert data["preview"]["valid_events"] == 2
+
+
+def test_llm_group_proposal_uses_only_observed_samples(tmp_path):
+    _write(tmp_path, "vendor.csv", "Gene,Type,Delta PSI,p,PSI_S1,PSI_S2\nA,SE,0.4,0.001,0.2,0.8\n")
+    proposal = _FakeEnhancer({"sample_groups": {"S1": "Before", "S2": "After", "S999": "Invented"}})
+    data = preview_ingestion(tmp_path, enhancer=proposal)
+    assert data["mapping"]["sample_groups"] == {"S1": "Before", "S2": "After"}
+    assert data["preview"]["groups"] == {"Before": 1, "After": 1}
+    assert data["llm"]["used"] is True
+
+
+def test_native_llm_group_suggestion_is_reviewable(tmp_path):
+    _write(tmp_path, "AS_event_master.csv", "event_id,gene_id,gene_symbol,event_type,delta_PSI,FDR,PSI_S1,PSI_S2\n"
+           "E1,G1,GENE1,SE,0.4,0.001,0.2,0.8\n")
+    data = preview_ingestion(tmp_path, enhancer=_FakeEnhancer({"sample_groups": {"S1": "A", "S2": "B", "S3": "C"}}))
+    assert data["mapping"]["sample_groups"] == {"S1": "A", "S2": "B"}
+    assert data["sample_ids"] == ["S1", "S2"]
