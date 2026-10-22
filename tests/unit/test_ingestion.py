@@ -153,6 +153,16 @@ def test_native_group_confirmation_is_persisted(tmp_path):
     assert load_dataset(tmp_path).groups == {"A": ["S1"], "B": ["S2"]}
 
 
+def test_native_group_confirmation_updates_existing_tsv(tmp_path):
+    _write(tmp_path, "AS_event_master.csv", "event_id,gene_id,gene_symbol,event_type,delta_PSI,FDR,PSI_S1,PSI_S2\n"
+           "E1,G1,GENE1,SE,0.4,0.001,0.2,0.8\n")
+    _write(tmp_path, "sample_metadata.tsv", "sample_id\tgroup\ttissue\nS1\tOld\tBrain\nS2\tOther\tLiver\n")
+    apply_native_groups(tmp_path, {"S1": "Before", "S2": "After"})
+    dataset = load_dataset(tmp_path)
+    assert dataset.groups == {"Before": ["S1"], "After": ["S2"]}
+    assert {sample.sample_id: sample.tissue for sample in dataset.samples} == {"S1": "Brain", "S2": "Liver"}
+
+
 def test_unmappable_directory_reports_error_and_apply_refuses(tmp_path):
     _write(tmp_path, "notes.csv", "author,comment\nAlice,hello\nBob,hello\n")
 

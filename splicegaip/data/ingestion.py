@@ -2181,14 +2181,25 @@ def apply_native_groups(input_dir: str | Path, sample_groups: Mapping[str, str])
     labels = {sample_id: str(sample_groups[sample_id]).strip() for sample_id in sample_ids}
     if any(not label or len(label) > 80 for label in labels.values()) or len(set(labels.values())) != 2:
         raise ValueError("Assign every sample to exactly one of two non-empty groups")
-    target = directory / "sample_metadata.csv"
-    with target.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["sample_id", "group", "condition"])
-        for sample_id in sorted(sample_ids):
-            writer.writerow([sample_id, labels[sample_id], labels[sample_id]])
-    validation = validate_dataset(load_dataset(directory))
-    if not validation.ok:
-        target.unlink(missing_ok=True)
-        raise ValueError("Group assignment produced an invalid dataset")
+    from splicegaip.data.loader import METADATA_FILENAMES
+
+    target = next((directory / name for name in METADATA_FILENAMES if (directory / name).is_file()), directory / "sample_metadata.csv")
+    original = target.read_bytes() if target.is_file() else None
+    previous = {sample.sample_id: sample for sample in dataset.samples}
+    try:
+        with target.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle, delimiter="\t" if target.suffix.lower() == ".tsv" else ",")
+            writer.writerow(["sample_id", "group", "condition", "tissue", "batch"])
+            for sample_id in sorted(sample_ids):
+                old = previous.get(sample_id)
+                writer.writerow([sample_id, labels[sample_id], labels[sample_id], old.tissue if old else "", old.batch if old else ""])
+        validation = validate_dataset(load_dataset(directory))
+        if not validation.ok:
+            raise ValueError("Group assignment produced an invalid dataset")
+    except Exception:
+        if original is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.write_bytes(original)
+        raise
     return {"path": str(directory), "sample_count": len(sample_ids), "groups": dict(Counter(labels.values()))}
