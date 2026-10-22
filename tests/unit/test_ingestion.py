@@ -141,6 +141,17 @@ def test_confirmed_groups_create_sample_metadata_for_unlabeled_samples(tmp_path)
     assert "No PSI values" not in boxes.caption
 
 
+def test_groups_allow_delta_to_be_computed_from_sample_psi(tmp_path):
+    _write(tmp_path, "vendor.csv", "Gene,Type,p,PSI_S1,PSI_S2\nA,SE,0.001,0.2,0.8\n")
+    preview = preview_ingestion(tmp_path, use_llm=False)
+    mapping = preview["mapping"]
+    mapping["sample_groups"] = {"S1": "Control", "S2": "Drug"}
+    mapping["sample_groups_confirmed"] = True
+    result = apply_ingestion(tmp_path, mapping)
+    event = load_dataset(result["path"]).events[0]
+    assert event.delta_psi == pytest.approx(0.6)
+
+
 def test_native_group_confirmation_is_persisted(tmp_path):
     _write(tmp_path, "AS_event_master.csv", "event_id,gene_id,gene_symbol,event_type,delta_PSI,FDR,PSI_S1,PSI_S2\n"
            "E1,G1,GENE1,SE,0.4,0.001,0.2,0.8\n")
