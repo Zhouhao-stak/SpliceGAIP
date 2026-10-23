@@ -1710,12 +1710,23 @@ function renderIngestModal() {
   if (sampleIds.length) {
     const labels = ingestState.groupLabels;
     const assignments = ingestState.mapping.sample_groups;
+    const assignedCount = sampleIds.filter(id => !!assignments[id]).length;
+    const source = data.group_suggestion_source;
+    const sourceText = source === 'previous_metadata'
+      ? ingestT('已从相同事件文件的历史样本表恢复分组建议。', 'Group suggestions were restored from a previous sample sheet for the identical event file.')
+      : source === 'metadata'
+        ? ingestT('已读取上传的样本表。', 'Groups were read from the uploaded sample sheet.')
+        : source === 'llm' || data.mapping_source === 'llm+heuristic'
+          ? ingestT('大模型已提出分组建议，请核对。', 'The model suggested sample groups; please review them.')
+          : ingestT('尚无可靠的完整分组建议，可修改分组名称并批量分配。', 'No complete reliable grouping was found; you can edit group names and assign samples in batches.');
     html.push('<div><div class="ingest-section-title">' + ingestEsc(ingestT('样本分组确认', 'Confirm sample groups')) + '</div>' +
+      '<div style="margin:8px 0;color:var(--text-secondary)">' + ingestEsc(sourceText) + ' ' + assignedCount + '/' + sampleIds.length + '</div>' +
       '<div style="display:flex;gap:8px;margin:8px 0"><input data-group-label="0" value="' + ingestEsc(labels[0]) + '" oninput="ingestGroupLabelChanged(this)" aria-label="Group 1" placeholder="Group 1" style="width:48%;padding:8px"><input data-group-label="1" value="' + ingestEsc(labels[1]) + '" oninput="ingestGroupLabelChanged(this)" aria-label="Group 2" placeholder="Group 2" style="width:48%;padding:8px"></div>' +
-      '<div class="ingest-map-grid">' + sampleIds.map(function (sampleId) {
+      '<div style="display:flex;gap:8px;margin:8px 0"><button type="button" class="btn btn-sm btn-secondary" onclick="ingestAssignUnassigned(0)">' + ingestEsc(ingestT('未分配项 → 第一组', 'Unassigned → group 1')) + '</button><button type="button" class="btn btn-sm btn-secondary" onclick="ingestAssignUnassigned(1)">' + ingestEsc(ingestT('未分配项 → 第二组', 'Unassigned → group 2')) + '</button></div>' +
+      '<details' + (assignedCount < sampleIds.length ? ' open' : '') + '><summary style="cursor:pointer;margin:8px 0">' + ingestEsc(ingestT('查看或调整逐样本分组', 'Review or edit individual samples')) + '</summary><div class="ingest-map-grid">' + sampleIds.map(function (sampleId) {
         const current = assignments[sampleId] || '';
         return '<div class="ingest-map-row"><label>' + ingestEsc(sampleId) + '</label><select data-sample-id="' + ingestEsc(sampleId) + '" onchange="ingestGroupChanged(this)"><option value="">' + ingestEsc(ingestT('— 请选择 —', '— Select —')) + '</option><option value="0"' + (current === labels[0] ? ' selected' : '') + '>' + ingestEsc(labels[0]) + '</option><option value="1"' + (current === labels[1] ? ' selected' : '') + '>' + ingestEsc(labels[1]) + '</option></select></div>';
-      }).join('') + '</div></div>');
+      }).join('') + '</div></details></div>');
   } else {
     html.push('<div class="ingest-issue warning">' + ingestEsc(ingestT('没有每样本 PSI 数据，无法生成真实的样本箱线图或热图。', 'No per-sample PSI data: sample box plots and heatmaps cannot be generated.')) + '</div>');
   }
@@ -1773,6 +1784,15 @@ function ingestGroupChanged(select) {
   const sampleId = select.getAttribute('data-sample-id');
   ingestState.mapping.sample_groups[sampleId] = select.value === '' ? '' : ingestState.groupLabels[Number(select.value)];
   updateIngestConfirmState();
+}
+
+function ingestAssignUnassigned(index) {
+  if (!ingestState) return;
+  const label = ingestState.groupLabels[index];
+  (ingestState.data.sample_ids || []).forEach(function (id) {
+    if (!ingestState.mapping.sample_groups[id]) ingestState.mapping.sample_groups[id] = label;
+  });
+  renderIngestModal();
 }
 
 function ingestGroupLabelChanged(input) {

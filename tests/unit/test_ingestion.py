@@ -258,3 +258,17 @@ def test_native_llm_group_suggestion_is_reviewable(tmp_path):
     data = preview_ingestion(tmp_path, enhancer=_FakeEnhancer({"sample_groups": {"S1": "A", "S2": "B", "S3": "C"}}))
     assert data["mapping"]["sample_groups"] == {"S1": "A", "S2": "B"}
     assert data["sample_ids"] == ["S1", "S2"]
+
+
+def test_identical_previous_upload_prefills_groups(tmp_path):
+    old = tmp_path / "splicegaip_upload_old"
+    new = tmp_path / "splicegaip_upload_new"
+    old.mkdir()
+    new.mkdir()
+    events = "event_id,gene_id,gene_symbol,event_type,delta_PSI,FDR,PSI_S1,PSI_S2\nE1,G1,GENE1,SE,0.4,0.001,0.2,0.8\n"
+    _write(old, "AS_event_master.csv", events)
+    _write(new, "AS_event_master.csv", events)
+    _write(old, "01_sample_metadata.csv", "sample_id,group\nS1,Before\nS2,After\n")
+    data = preview_ingestion(new, use_llm=False)
+    assert data["group_suggestion_source"] == "previous_metadata"
+    assert data["mapping"]["sample_groups"] == {"S1": "Before", "S2": "After"}

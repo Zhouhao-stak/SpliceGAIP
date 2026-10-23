@@ -30,6 +30,7 @@ a self-contained directory that the existing :func:`load_dataset` accepts.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import re
@@ -1664,6 +1665,12 @@ def _native_preview(directory: Path) -> dict[str, Any] | None:
     sample_ids = sorted({sample_id for event in dataset.events for sample_id in event.psi_by_sample})
     known = {sample.sample_id: sample.group for sample in dataset.samples}
     proposed = {sample_id: known.get(sample_id) or _infer_group(sample_id) or "" for sample_id in sample_ids}
+    source = "metadata" if known else "sample_names"
+    if sample_ids and not all(proposed.values()):
+        previous = _groups_from_identical_upload(directory, sample_ids)
+        if previous:
+            proposed = previous
+            source = "previous_metadata"
     return {
         "status": "native",
         "native": True,
@@ -1682,6 +1689,7 @@ def _native_preview(directory: Path) -> dict[str, Any] | None:
         "event_file": None,
         "mapping": {"sample_groups": proposed} if sample_ids else {},
         "sample_ids": sample_ids,
+        "group_suggestion_source": source,
         "preview": {
             "total_rows": len(dataset.events),
             "valid_events": len(dataset.events),
@@ -1701,6 +1709,46 @@ def _native_preview(directory: Path) -> dict[str, Any] | None:
             "validation": validation.as_dict(),
         },
     }
+
+
+def _groups_from_identical_upload(directory: Path, sample_ids: Sequence[str]) -> dict[str, str]:
+    """Reuse metadata only when a previous upload contains byte-identical events."""
+    from splicegaip.data.loader import METADATA_FILENAMES, _find_file
+    from splicegaip.splicing.schema import load_sample_metadata
+
+    if not directory.name.startswith("splicegaip_upload_"):
+        return {}
+    event_files = [path for path in directory.iterdir() if path.is_file() and "AS_event_master" in path.name]
+    if len(event_files) != 1:
+        return {}
+    event_file = event_files[0]
+
+    def digest(path: Path) -> str:
+        with path.open("rb") as handle:
+            return hashlib.file_digest(handle, "sha256").hexdigest()
+
+    source_digest = None
+    assignments: list[dict[str, str]] = []
+    for sibling in directory.parent.glob("splicegaip_upload_*"):
+        if sibling == directory or not sibling.is_dir():
+            continue
+        metadata = _find_file(sibling, METADATA_FILENAMES)
+        other_event = sibling / event_file.name
+        if metadata is None or not other_event.is_file() or other_event.stat().st_size != event_file.stat().st_size:
+            continue
+        if source_digest is None:
+            source_digest = digest(event_file)
+        if digest(other_event) != source_digest:
+            continue
+        try:
+            groups = {sample.sample_id: sample.group for sample in load_sample_metadata(metadata)}
+        except (OSError, ValueError, UnicodeError):
+            continue
+        if set(groups) == set(sample_ids) and len(set(groups.values())) == 2 and all(groups.values()):
+            assignments.append(groups)
+    if assignments and all(groups == assignments[0] for groups in assignments):
+        return assignments[0]
+    return {}
 
 
 def preview_ingestion(
@@ -1750,6 +1798,7 @@ def preview_ingestion(
                             if sample_id in sample_ids and str(label or "").strip():
                                 native["mapping"]["sample_groups"][sample_id] = str(label).strip()[:80]
                         native["mapping_source"] = "llm+heuristic"
+                        native["group_suggestion_source"] = "llm"
             except Exception:  # noqa: BLE001 - group review remains available
                 pass
         native["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
