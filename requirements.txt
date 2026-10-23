@@ -33,6 +33,7 @@ streamlit>=1.46   # st.image width="stretch" requires 1.46+
 fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
+pywebview>=6.2,<7; sys_platform == "win32"  # Embedded desktop window
 
 # --- MCP (Model Context Protocol) ------------------------------------------------
 mcp>=1.0.0        # MCP SDK for server/client communication

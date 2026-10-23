@@ -3361,9 +3361,14 @@ document.addEventListener('DOMContentLoaded', () => { loadDashboard(); loadModel
     } catch (e) {}
   }
 
-  var nativeAlert = window.alert.bind(window);
   window.alert = function (message) {
-    return nativeAlert(lang === "zh" ? String(message) : translateText(String(message)));
+    var notice = document.createElement("div");
+    notice.setAttribute("role", "status");
+    notice.textContent = lang === "zh" ? String(message) : translateText(String(message));
+    notice.style.cssText = "position:fixed;right:24px;bottom:24px;z-index:99999;max-width:520px;padding:16px 20px;border-radius:12px;background:#12313b;color:#fff;box-shadow:0 12px 36px #0008;white-space:pre-line;font-size:14px;cursor:pointer";
+    notice.onclick = function () { notice.remove(); };
+    document.body.appendChild(notice);
+    setTimeout(function () { notice.remove(); }, 8000);
   };
   var nativeConfirm = window.confirm.bind(window);
   window.confirm = function (message) {
